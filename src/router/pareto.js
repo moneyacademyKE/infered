@@ -52,11 +52,10 @@ function evaluateCascadeTier({
       const outputTokenPrice = quote.completion !== undefined ? quote.completion : quote.blendedPrice;
       const blendedPrice = quote.blendedPrice;
 
-      // Primary model: included as primary choice if healthy (or if no ceiling constraint).
-      // Fallback models (i > 0): MUST satisfy ceiling for output tokens / blended price.
-      if (!isPrimary && ceiling !== Infinity) {
+      // Strict budget invariant: Disqualify ANY model (including Sol) whose output token price exceeds the ceiling
+      if (ceiling !== Infinity) {
         if (outputTokenPrice > ceiling && blendedPrice > ceiling) {
-          continue; // Skip fallback models exceeding this tier ceiling
+          continue;
         }
       }
 

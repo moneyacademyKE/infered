@@ -57,52 +57,56 @@
       (is (> (:cheapWinnerSavings res) 50)))))
 
 (deftest test-sol-budget-cascade-policy
-  (testing "Sol budget cascade routes to cx/gpt-5.6-sol first, then strictly cascades through glm-flash -> glm -> kimi -> terra only when <= $0.10"
+  (testing "Sol budget cascade routes to cx/gpt-5.6-sol when <= $0.10, but switches down to glm-5.3-flash when Sol is > $0.10"
     (let [res (run-node-eval
                "import { rankCandidates } from './src/router/pareto.js';
                 import { createPriceCache, updateSpotPrices } from './src/router/pricing.js';
-                import { createMetricsStore, recordSample } from './src/router/metrics.js';
+                import { createMetricsStore } from './src/router/metrics.js';
 
-                const priceCache = createPriceCache([]);
+                const priceCacheCheapSol = createPriceCache([]);
                 const metricsStore = createMetricsStore();
 
-                updateSpotPrices(priceCache, [
-                  { providerId: 'sol-node-1', modelId: 'cx/gpt-5.6-sol', prompt: 2.00, completion: 8.00 },
-                  { providerId: 'flash-node-1', modelId: 'zai/glm-5.3-flash', prompt: 0.05, completion: 0.09 },
-                  { providerId: 'glm-node-1', modelId: 'zai/glm-5.3', prompt: 0.06, completion: 0.10 },
-                  { providerId: 'kimi-node-1', modelId: 'ali/kimi-k3', prompt: 0.20, completion: 0.40 },
-                  { providerId: 'terra-node-1', modelId: 'cx/gpt-5.6-terra', prompt: 0.05, completion: 0.09 }
+                // Sol is cheap: $0.08 <= $0.10
+                updateSpotPrices(priceCacheCheapSol, [
+                  { providerId: 'sol-node-1', modelId: 'cx/gpt-5.6-sol', prompt: 0.02, completion: 0.08 },
+                  { providerId: 'flash-node-1', modelId: 'zai/glm-5.3-flash', prompt: 0.01, completion: 0.04 }
                 ]);
-
-                const candidatesSolHealthy = rankCandidates({
+                const candidatesSolCheap = rankCandidates({
                   model: 'infered/sol-budget',
-                  priceCache,
+                  priceCache: priceCacheCheapSol,
                   metricsStore,
                   maxFallbackPrice: 0.10
                 });
 
-                for (let i = 0; i < 5; i++) {
-                  recordSample(metricsStore, 'sol-node-1', 'cx/gpt-5.6-sol', { latencyMs: 5000, ttftMs: 5000, success: false });
-                }
-                const candidatesSolDown = rankCandidates({
+                // Sol is expensive: $13.50 > $0.10 -> must switch down to GLM-Flash
+                const priceCacheExpensiveSol = createPriceCache([]);
+                updateSpotPrices(priceCacheExpensiveSol, [
+                  { providerId: 'sol-node-2', modelId: 'cx/gpt-5.6-sol', prompt: 2.25, completion: 13.50 },
+                  { providerId: 'flash-node-2', modelId: 'zai/glm-5.3-flash', prompt: 0.01, completion: 0.04 },
+                  { providerId: 'glm-node-2', modelId: 'zai/glm-5.3', prompt: 0.02, completion: 0.08 },
+                  { providerId: 'kimi-node-2', modelId: 'ali/kimi-k3', prompt: 0.20, completion: 0.40 },
+                  { providerId: 'terra-node-2', modelId: 'cx/gpt-5.6-terra', prompt: 0.01, completion: 0.05 }
+                ]);
+                const candidatesSolExpensive = rankCandidates({
                   model: 'infered/sol-budget',
-                  priceCache,
+                  priceCache: priceCacheExpensiveSol,
                   metricsStore,
                   maxFallbackPrice: 0.10
                 });
 
                 console.log(JSON.stringify({
-                  firstChoiceWhenSolHealthy: candidatesSolHealthy[0].modelId,
-                  firstChoiceWhenSolDown: candidatesSolDown[0].modelId,
-                  secondChoiceWhenSolDown: candidatesSolDown[1].modelId,
-                  thirdChoiceWhenSolDown: candidatesSolDown[2].modelId,
-                  isKimiExcludedDueToPrice: !candidatesSolDown.some(c => c.modelId === 'ali/kimi-k3'),
-                  totalCandidatesDown: candidatesSolDown.length
+                  firstChoiceWhenSolCheap: candidatesSolCheap[0]?.modelId,
+                  firstChoiceWhenSolExpensive: candidatesSolExpensive[0]?.modelId,
+                  secondChoiceWhenSolExpensive: candidatesSolExpensive[1]?.modelId,
+                  thirdChoiceWhenSolExpensive: candidatesSolExpensive[2]?.modelId,
+                  isSolExcludedWhenExpensive: !candidatesSolExpensive.some(c => c.modelId === 'cx/gpt-5.6-sol'),
+                  isKimiExcludedDueToPrice: !candidatesSolExpensive.some(c => c.modelId === 'ali/kimi-k3')
                 }));")]
-      (is (= "cx/gpt-5.6-sol" (:firstChoiceWhenSolHealthy res)))
-      (is (= "zai/glm-5.3-flash" (:firstChoiceWhenSolDown res)))
-      (is (= "zai/glm-5.3" (:secondChoiceWhenSolDown res)))
-      (is (= "cx/gpt-5.6-terra" (:thirdChoiceWhenSolDown res)))
+      (is (= "cx/gpt-5.6-sol" (:firstChoiceWhenSolCheap res)))
+      (is (= "zai/glm-5.3-flash" (:firstChoiceWhenSolExpensive res)))
+      (is (= "zai/glm-5.3" (:secondChoiceWhenSolExpensive res)))
+      (is (= "cx/gpt-5.6-terra" (:thirdChoiceWhenSolExpensive res)))
+      (is (:isSolExcludedWhenExpensive res))
       (is (:isKimiExcludedDueToPrice res)))))
 
 (deftest test-elastic-budget-escalation-ladder
@@ -110,17 +114,13 @@
     (let [res (run-node-eval
                "import { rankCandidates } from './src/router/pareto.js';
                 import { createPriceCache, updateSpotPrices } from './src/router/pricing.js';
-                import { createMetricsStore, recordSample } from './src/router/metrics.js';
+                import { createMetricsStore } from './src/router/metrics.js';
 
                 const metricsStore = createMetricsStore();
-                for (let i = 0; i < 5; i++) {
-                  recordSample(metricsStore, 'sol-node', 'cx/gpt-5.6-sol', { latencyMs: 5000, ttftMs: 5000, success: false });
-                }
 
                 // Case 1: Models available at <= $0.10
                 const cache1 = createPriceCache([]);
                 updateSpotPrices(cache1, [
-                  { providerId: 'sol-node', modelId: 'cx/gpt-5.6-sol', prompt: 2.0, completion: 8.0 },
                   { providerId: 'p1', modelId: 'zai/glm-5.3-flash', prompt: 0.05, completion: 0.08 }
                 ]);
                 const res1 = rankCandidates({ model: 'infered/sol-budget', priceCache: cache1, metricsStore });
@@ -128,7 +128,6 @@
                 // Case 2: Output prices surge to $0.15 (0 models <= $0.10, but available <= $0.20)
                 const cache2 = createPriceCache([]);
                 updateSpotPrices(cache2, [
-                  { providerId: 'sol-node', modelId: 'cx/gpt-5.6-sol', prompt: 2.0, completion: 8.0 },
                   { providerId: 'p2', modelId: 'zai/glm-5.3-flash', prompt: 0.10, completion: 0.15 }
                 ]);
                 const res2 = rankCandidates({ model: 'infered/sol-budget', priceCache: cache2, metricsStore });
@@ -136,7 +135,6 @@
                 // Case 3: Output prices surge to $0.25 (0 models <= $0.20, but available <= $0.30)
                 const cache3 = createPriceCache([]);
                 updateSpotPrices(cache3, [
-                  { providerId: 'sol-node', modelId: 'cx/gpt-5.6-sol', prompt: 2.0, completion: 8.0 },
                   { providerId: 'p3', modelId: 'zai/glm-5.3-flash', prompt: 0.15, completion: 0.25 }
                 ]);
                 const res3 = rankCandidates({ model: 'infered/sol-budget', priceCache: cache3, metricsStore });
@@ -144,7 +142,6 @@
                 // Case 4: Output prices surge to $0.45 (0 models <= $0.30 -> routes to cheapest healthy for zero downtime)
                 const cache4 = createPriceCache([]);
                 updateSpotPrices(cache4, [
-                  { providerId: 'sol-node', modelId: 'cx/gpt-5.6-sol', prompt: 2.0, completion: 8.0 },
                   { providerId: 'p4', modelId: 'zai/glm-5.3-flash', prompt: 0.20, completion: 0.45 }
                 ]);
                 const res4 = rankCandidates({ model: 'infered/sol-budget', priceCache: cache4, metricsStore });
