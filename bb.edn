@@ -1,0 +1,7 @@
+{:paths ["src" "test"]
+ :tasks
+ {test-all (load-file "test/run_tests.clj")
+  live-test (load-file "test/live_test.clj")
+  dev (load-file "src/dev_server.clj")
+  sim (load-file "test/sim_market.clj")
+  lint (load-file "test/lint.clj")}}

@@ -1,0 +1,7 @@
+INFERHUB_API_KEY=your_inferhub_api_key_here
+INFERHUB_BASE_URL=https://api.inferhub.dev/v1
+ROUTING_POLICY=sol-budget-cascade
+MAX_FALLBACK_PRICE=0.10
+PRICE_WEIGHT=0.6
+SPEED_WEIGHT=0.2
+QUALITY_WEIGHT=0.2
