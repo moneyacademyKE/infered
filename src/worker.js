@@ -1,7 +1,7 @@
 /**
  * Infered - Dynamic Virtual LLM Router for InferHub Marketplace
- * Cloudflare Workers Edge Entry Point with Multi-Tier Edge Caching,
- * Elastic Budget Escalation, Tool Call Autohealing & Continuous Learning
+ * Cloudflare Workers Edge Entry Point with Continuous SWR Live Marketplace Ingestion,
+ * Multi-Tier Edge Caching, Elastic Budget Escalation & Tool Call Autohealing
  */
 
 import { VIRTUAL_ALIASES, MODEL_TIERS } from "./router/catalog.js";
@@ -18,6 +18,8 @@ let globalPriceCache = null;
 let globalMetricsStore = null;
 let globalCacheStore = null;
 let globalExemplarStore = null;
+
+const SWR_SYNC_INTERVAL_MS = 15000; // 15 seconds
 
 function getOrInitState() {
   if (!globalPriceCache) globalPriceCache = createPriceCache();
@@ -52,7 +54,7 @@ function jsonResponse(data, status = 200, extraHeaders = {}) {
   });
 }
 
-function parseWeightsAndBudget(request, env) {
+function parseWeightsAndBudget(request, requestBody, env, url) {
   let weights = { ...DEFAULT_WEIGHTS };
   const headerWeights = request.headers.get("X-Infered-Weights");
   if (headerWeights) {
@@ -71,8 +73,15 @@ function parseWeightsAndBudget(request, env) {
 
   let maxFallbackPrice = null;
   const headerMaxPrice = request.headers.get("X-Infered-Max-Price");
+  const queryMaxPrice = url ? url.searchParams.get("max_price") : null;
+  const bodyMaxPrice = requestBody?.max_price || requestBody?.maxPrice || requestBody?.maxPriceThreshold || requestBody?.budget_threshold;
+
   if (headerMaxPrice) {
     maxFallbackPrice = parseFloat(headerMaxPrice);
+  } else if (bodyMaxPrice !== undefined && bodyMaxPrice !== null) {
+    maxFallbackPrice = parseFloat(bodyMaxPrice);
+  } else if (queryMaxPrice) {
+    maxFallbackPrice = parseFloat(queryMaxPrice);
   } else if (env?.MAX_FALLBACK_PRICE) {
     maxFallbackPrice = parseFloat(env.MAX_FALLBACK_PRICE);
   }
@@ -90,6 +99,18 @@ async function syncLiveInferHubQuotes(priceCache, baseUrl, apiKey) {
       ingestInferHubModelsResponse(priceCache, data);
     }
   } catch {}
+}
+
+function triggerBackgroundSwrSyncIfNeeded(priceCache, baseUrl, apiKey, ctx) {
+  if (!apiKey) return;
+  const now = Date.now();
+  if (now - priceCache.lastSyncedAt > SWR_SYNC_INTERVAL_MS) {
+    priceCache.lastSyncedAt = now; // Prevent duplicate concurrent sync triggers
+    const syncPromise = syncLiveInferHubQuotes(priceCache, baseUrl, apiKey);
+    if (ctx && typeof ctx.waitUntil === "function") {
+      ctx.waitUntil(syncPromise);
+    }
+  }
 }
 
 function createStandaloneMockFetch() {
@@ -132,6 +153,9 @@ export default {
     const { priceCache, metricsStore, cacheStore, exemplarStore } = getOrInitState();
     const apiKey = env?.INFERHUB_API_KEY || request.headers.get("Authorization")?.replace(/^Bearer\s+/i, "");
     const baseUrl = env?.INFERHUB_BASE_URL || "https://api.inferhub.dev/v1";
+
+    // Continuous SWR Market Polling: Asynchronously refresh order books if stale
+    triggerBackgroundSwrSyncIfNeeded(priceCache, baseUrl, apiKey, ctx);
 
     if (path === "/" || path === "/dashboard") {
       return new Response(renderDashboardHtml(), {
@@ -221,7 +245,7 @@ export default {
       try {
         let requestBody = await request.json();
         const requestedModel = requestBody.model || "infered/sol-budget";
-        const { weights, maxFallbackPrice } = parseWeightsAndBudget(request, env);
+        const { weights, maxFallbackPrice } = parseWeightsAndBudget(request, requestBody, env, url);
 
         // 1. Session affinity check
         const sessionId = request.headers.get("X-Session-ID") || request.headers.get("X-Session-Affinity");
@@ -245,7 +269,7 @@ export default {
           }
         }
 
-        // 3. Candidate ranking
+        // 3. Candidate ranking with strict output token budget ceiling
         const candidates = rankCandidates({
           model: requestedModel,
           priceCache,
