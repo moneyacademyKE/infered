@@ -52,9 +52,9 @@ function evaluateCascadeTier({
       const outputTokenPrice = quote.completion !== undefined ? quote.completion : quote.blendedPrice;
       const blendedPrice = quote.blendedPrice;
 
-      // Strict budget invariant: Disqualify ANY model (including Sol) whose output token price exceeds the ceiling
+      // Strict output token budget ceiling: Disqualify any candidate whose output token price exceeds the ceiling
       if (ceiling !== Infinity) {
-        if (outputTokenPrice > ceiling && blendedPrice > ceiling) {
+        if (outputTokenPrice > ceiling) {
           continue;
         }
       }
