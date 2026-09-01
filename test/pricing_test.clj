@@ -9,75 +9,71 @@
       (json/parse-string out true)
       (throw (ex-info (str "Node eval error: " err) {:err err :out out})))))
 
-(deftest test-pricing-calculations-and-discounts
-  (testing "Calculates accurate discount percentages vs official baselines"
+(deftest test-pricing-calculations-and-defaults
+  (testing "Calculates blended prices and defaults all cascade models to <= $0.10 output tokens"
     (let [res (run-node-eval
-               "import { createPriceCache, updateSpotPrices, getSpotQuote, calculateSavingsPct } from './src/router/pricing.js';
-                const cache = createPriceCache([]);
-                
-                updateSpotPrices(cache, [
-                  { providerId: 'inferhub-node-1', modelId: 'claude-3.5-sonnet', prompt: 1.20, completion: 6.00 },
-                  { providerId: 'inferhub-node-2', modelId: 'claude-3.5-sonnet', prompt: 2.70, completion: 13.50 }
-                ]);
-                
-                const quote1 = getSpotQuote(cache, 'inferhub-node-1', 'claude-3.5-sonnet');
-                const quote2 = getSpotQuote(cache, 'inferhub-node-2', 'claude-3.5-sonnet');
-                const savings1 = calculateSavingsPct('claude-3.5-sonnet', quote1);
-                const savings2 = calculateSavingsPct('claude-3.5-sonnet', quote2);
+               "import { calculateBlendedPrice, createDefaultMarketQuotes, createPriceCache, getQuotesForModel } from './src/router/pricing.js';
+
+                const blended = calculateBlendedPrice(0.01, 0.06);
+                const cache = createPriceCache();
+
+                const solQuotes = getQuotesForModel(cache, 'cx/gpt-5.6-sol');
+                const flashQuotes = getQuotesForModel(cache, 'zai/glm-5.3-flash');
+                const glmQuotes = getQuotesForModel(cache, 'zai/glm-5.3');
+                const terraQuotes = getQuotesForModel(cache, 'cx/gpt-5.6-terra');
+                const kimiQuotes = getQuotesForModel(cache, 'ali/kimi-k3');
 
                 console.log(JSON.stringify({
-                  savings1Pct: savings1,
-                  savings2Pct: savings2,
-                  isQuote1Cheaper: quote1.blendedPrice < quote2.blendedPrice
+                  blended,
+                  solOutput: solQuotes[0].completion,
+                  solSavingsPct: solQuotes[0].savingsPct,
+                  flashOutput: flashQuotes[0].completion,
+                  glmOutput: glmQuotes[0].completion,
+                  terraOutput: terraQuotes[0].completion,
+                  kimiOutput: kimiQuotes[0].completion,
+                  allUnderTenCents: [solQuotes[0], flashQuotes[0], glmQuotes[0], terraQuotes[0], kimiQuotes[0]].every(q => q.completion <= 0.10)
                 }));")]
-      (is (== 60 (:savings1Pct res)))
-      (is (== 10 (:savings2Pct res)))
-      (is (:isQuote1Cheaper res)))))
+      (is (= 0.0475 (:blended res)))
+      (is (<= (:solOutput res) 0.10))
+      (is (> (:solSavingsPct res) 95))
+      (is (<= (:flashOutput res) 0.10))
+      (is (<= (:glmOutput res) 0.10))
+      (is (<= (:terraOutput res) 0.10))
+      (is (<= (:kimiOutput res) 0.10))
+      (is (:allUnderTenCents res)))))
 
-(deftest test-inferhub-live-models-ingestion
-  (testing "Ingests and unpacks live InferHub /v1/models response with ask books"
+(deftest test-inferhub-orderbook-ingestion
+  (testing "Parses live asks_in and asks_out from InferHub models response"
     (let [res (run-node-eval
                "import { createPriceCache, ingestInferHubModelsResponse, getQuotesForModel } from './src/router/pricing.js';
-                const cache = createPriceCache([]);
 
-                const mockInferHubResponse = {
+                const cache = createPriceCache([]);
+                const mockInferHubData = {
                   data: [
                     {
                       id: 'cx/gpt-5.6-sol',
                       pricing: {
-                        official_in: 5,
-                        official_out: 30,
-                        asks_in: [0.01, 0.05, 0.10],
-                        asks_out: [0.06, 0.30, 0.60],
-                        min_ask_in: 0.01,
-                        min_ask_out: 0.06
-                      }
-                    },
-                    {
-                      id: 'zai/glm-5.3-flash',
-                      pricing: {
-                        official_in: 0.15,
-                        official_out: 0.5,
-                        asks_in: [0.0075, 0.015],
-                        asks_out: [0.025, 0.05],
-                        min_ask_in: 0.0075,
-                        min_ask_out: 0.025
+                        official_in: 5.00,
+                        official_out: 30.00,
+                        asks_in: [0.010, 0.015, 0.020],
+                        asks_out: [0.060, 0.075, 0.090]
                       }
                     }
                   ]
                 };
 
-                ingestInferHubModelsResponse(cache, mockInferHubResponse);
-                const solQuotes = getQuotesForModel(cache, 'cx/gpt-5.6-sol');
-                const flashQuotes = getQuotesForModel(cache, 'zai/glm-5.3-flash');
+                ingestInferHubModelsResponse(cache, mockInferHubData);
+                const quotes = getQuotesForModel(cache, 'cx/gpt-5.6-sol');
 
                 console.log(JSON.stringify({
-                  solQuotesCount: solQuotes.length,
-                  flashQuotesCount: flashQuotes.length,
-                  bestSolBlendedPrice: solQuotes[0].blendedPrice,
-                  bestSolSavingsPct: solQuotes[0].savingsPct
+                  quoteCount: quotes.length,
+                  bestPromptPrice: quotes[0].prompt,
+                  bestCompletionPrice: quotes[0].completion,
+                  bestBlendedPrice: quotes[0].blendedPrice,
+                  savingsPct: quotes[0].savingsPct
                 }));")]
-      (is (== 3 (:solQuotesCount res)))
-      (is (== 2 (:flashQuotesCount res)))
-      (is (< (:bestSolBlendedPrice res) 0.05))
-      (is (> (:bestSolSavingsPct res) 90)))))
+      (is (= 3 (:quoteCount res)))
+      (is (= 0.01 (:bestPromptPrice res)))
+      (is (= 0.06 (:bestCompletionPrice res)))
+      (is (= 0.0475 (:bestBlendedPrice res)))
+      (is (> (:savingsPct res) 95)))))
