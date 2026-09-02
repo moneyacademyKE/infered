@@ -82,6 +82,18 @@ export const CASCADE_CHAINS = {
   "infered/glm-budget": GLM_BUDGET_FALLBACK_CHAIN
 };
 
+// Default requested model when the caller sends none — preserved behavior:
+// resolveVirtualModel previously fell back to the "infered/auto" alias.
+export const DEFAULT_MODEL = "infered/auto";
+
+// Declared sibling-chain fallback: when a chain prices out entirely or every
+// candidate fails upstream, the executor may retry exactly once on this chain.
+// Terminal chains simply have no entry (no fallback, no loop).
+export const CHAIN_FALLBACKS = {
+  "infered/sol-budget": "infered/glm-budget",
+  "infered/glm-budget": "infered/auto"
+};
+
 // Virtual aliases mapping to candidate model sets
 export const VIRTUAL_ALIASES = {
   "infered/auto": Object.keys(MODEL_TIERS),
@@ -105,7 +117,7 @@ export const VIRTUAL_ALIASES = {
  * Resolves a requested model name to a list of candidate model IDs.
  */
 export function resolveVirtualModel(modelName) {
-  if (!modelName) return VIRTUAL_ALIASES["infered/auto"];
+  if (!modelName) return VIRTUAL_ALIASES[DEFAULT_MODEL];
   const cleanName = modelName.trim().toLowerCase();
   
   if (VIRTUAL_ALIASES[cleanName]) {

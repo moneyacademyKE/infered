@@ -126,3 +126,49 @@
       (is (= 499 (:status res)))
       (is (= "Client disconnected before completion." (:error res)))
       (is (= 1 (:upstreamStarted res)) "second candidate must be skipped after client abort"))))
+
+(deftest test-client-retry-budget-cap
+  (testing "Executor stops at maxAttempts even when the order book offers more candidates"
+    (let [res (run-node-eval
+               "import { executeWithFallback } from './src/router/client.js';
+                import { createMetricsStore } from './src/router/metrics.js';
+
+                const metricsStore = createMetricsStore();
+
+                let upstreamStarted = 0;
+                // Every node fails — simulates a brownout with a long candidate list
+                const failingFetch = async () => {
+                  upstreamStarted++;
+                  return new Response(JSON.stringify({ error: { message: 'upstream down' } }), {
+                    status: 503,
+                    headers: { 'Content-Type': 'application/json' }
+                  });
+                };
+
+                // Order book offers 8 nodes; budget only pays for 3
+                const candidates = Array.from({ length: 8 }, (_, i) => ({
+                  providerId: `node-${i}`, modelId: 'm1', savingsPct: 10, blendedPrice: 0.1
+                }));
+
+                const result = await executeWithFallback({
+                  candidates,
+                  requestBody: { messages: [{ role: 'user', content: 'hi' }] },
+                  apiKey: 'test-key',
+                  metricsStore,
+                  fetchFn: failingFetch,
+                  maxAttempts: 3
+                });
+
+                console.log(JSON.stringify({
+                  success: result.success,
+                  status: result.status,
+                  error: result.error,
+                  attempts: result.attempts,
+                  upstreamStarted,
+                  failoverCount: result.failoverErrors.length
+                }));")]
+      (is (false? (:success res)))
+      (is (= 3 (:upstreamStarted res)) "must stop after maxAttempts upstream starts, not exhaust the order book")
+      (is (= 3 (:attempts res)))
+      (is (= 3 (:failoverCount res)))
+      (is (re-find #"Retry budget exhausted after 3" (:error res)) "error must say the retry budget was spent, not that ALL nodes failed"))))

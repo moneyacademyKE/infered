@@ -5,7 +5,7 @@
  */
 
 import { recordSample, recordUsage } from "./metrics.js";
-import { getOfficialPrice } from "./catalog.js";
+import { getOfficialPrice, CHAIN_FALLBACKS } from "./catalog.js";
 
 const DEFAULT_TIMEOUT_MS = 25000;
 
@@ -135,7 +135,8 @@ export function executeWithFallback({
   fetchFn = fetch,
   baseUrl = "https://api.inferhub.dev/v1",
   timeoutMs = DEFAULT_TIMEOUT_MS,
-  requestSignal = null
+  requestSignal = null,
+  maxAttempts = 10
 }) {
   return (async () => {
     if (!candidates || candidates.length === 0) {
@@ -145,8 +146,11 @@ export function executeWithFallback({
     const errors = [];
 
     for (const candidate of candidates) {
-      // Don't start new upstream attempts for a caller who already left.
+      // Don't start new upstream attempts for a caller who already left,
+      // or once the retry budget is spent (free plan: 50 subrequests/request —
+      // a long order book must not be able to burn them all on one request).
       if (requestSignal && requestSignal.aborted) break;
+      if (errors.length >= maxAttempts) break;
 
       const result = await executeCandidateRequest({
         candidate,
@@ -223,13 +227,66 @@ export function executeWithFallback({
       };
     }
 
+    const retryBudgetSpent = errors.length >= maxAttempts;
     return {
       success: false,
       status: 503,
-      error: "All candidate nodes failed or capacity exhausted.",
+      error: retryBudgetSpent
+        ? `Retry budget exhausted after ${errors.length} upstream attempts.`
+        : "All candidate nodes failed or capacity exhausted.",
       selectedCandidate: candidates[0],
       attempts: errors.length,
       failoverErrors: errors
     };
   })();
+}
+
+/**
+ * Chain-level fallback policy, data-driven from catalog.CHAIN_FALLBACKS.
+ * Two honest passes, no loops: rank the entry chain; if it prices out
+ * entirely or every candidate fails upstream, retry exactly once with the
+ * declared fallback chain. Attempts are summed across passes so telemetry
+ * never undercounts what actually happened.
+ *
+ * @param {object} args
+ * @param {string} args.requestedModel - entry model/chain name as requested
+ * @param {function} args.rank - (model) => ranked candidates
+ * @param {function} args.execute - (candidates) => executeWithFallback result
+ * @returns {Promise<{result: object, candidates: Array, fallbackChain: string|null}>}
+ */
+export async function executeWithChainFallback({ requestedModel, rank, execute }) {
+  const fallbackName = CHAIN_FALLBACKS[requestedModel] || null;
+
+  let candidates = rank(requestedModel);
+  let fallbackChain = null;
+
+  // Entry chain priced out entirely under the current constraints —
+  // give the declared fallback chain a chance to rank candidates.
+  if (candidates.length === 0 && fallbackName) {
+    fallbackChain = fallbackName;
+    candidates = rank(fallbackName);
+  }
+
+  if (candidates.length === 0) {
+    return { result: { success: false, attempts: 0 }, candidates, fallbackChain };
+  }
+
+  let result = await execute(candidates);
+
+  if (!result.success && fallbackName) {
+    const fbCandidates = rank(fallbackName);
+    if (fbCandidates.length > 0) {
+      const primaryAttempts = result.attempts || 0;
+      const fbResult = await execute(fbCandidates);
+      if (fbResult.success) {
+        result = fbResult;
+        result.attempts = primaryAttempts + (fbResult.attempts || 1);
+        fallbackChain = fallbackName;
+      } else {
+        result.fallbackTried = fallbackName;
+      }
+    }
+  }
+
+  return { result, candidates, fallbackChain };
 }
