@@ -346,6 +346,12 @@ export default {
           }, result.status || 502);
         }
 
+        // Report and pin the candidate that ACTUALLY served the request —
+        // candidates[0] can fail over silently (attempts > 1), and headers
+        // or session affinity pointing at a model that never answered is
+        // exactly the kind of fiction this router must not tell.
+        const served = result.selectedCandidate || selected;
+
         let responseBody = result.responseBody;
         let toolWasHealed = false;
 
@@ -364,7 +370,7 @@ export default {
         }
 
         if (sessionId) {
-          setSessionAffinity(cacheStore, sessionId, selected.providerId, selected.modelId);
+          setSessionAffinity(cacheStore, sessionId, served.providerId, served.modelId);
         }
 
         if (isDeterministic && cacheKey && responseBody) {
@@ -375,18 +381,18 @@ export default {
         // Analytics SQL API. blobs[5] carries the session id so stickiness
         // (model pinning) can be verified against real traffic.
         recordRoutingAnalytics(env, {
-          indexes: [selected.modelId],
+          indexes: [served.modelId],
           blobs: [
             requestedModel,
-            selected.modelId,
-            selected.providerId,
-            String(selected.budgetTier ?? "-"),
-            String(selected.escalationLevel ?? 0),
+            served.modelId,
+            served.providerId,
+            String(served.budgetTier ?? "-"),
+            String(served.escalationLevel ?? 0),
             sessionId || "-",
-            selected.quote?.priceSource || "-"
+            served.quote?.priceSource || "-"
           ],
           doubles: [
-            selected.savingsPct || 0,
+            served.savingsPct || 0,
             result.latencyMs || 0,
             result.ttftMs || 0,
             result.attempts || 1
@@ -395,13 +401,13 @@ export default {
 
         const telemetryHeaders = {
           "x-infered-cache": "MISS",
-          "x-infered-selected-model": selected.modelId,
-          "x-infered-provider": selected.providerId,
-          "x-infered-savings-pct": String(selected.savingsPct),
+          "x-infered-selected-model": served.modelId,
+          "x-infered-provider": served.providerId,
+          "x-infered-savings-pct": String(served.savingsPct),
           "x-infered-latency-ms": String(result.latencyMs || 100),
           "x-infered-ttft-ms": String(result.ttftMs || 80),
-          "x-infered-budget-tier": String(selected.budgetTier || "0.10"),
-          "x-infered-escalation-level": String(selected.escalationLevel !== undefined ? selected.escalationLevel : 0),
+          "x-infered-budget-tier": String(served.budgetTier || "0.10"),
+          "x-infered-escalation-level": String(served.escalationLevel !== undefined ? served.escalationLevel : 0),
           "x-infered-tool-healed": toolWasHealed ? "true" : "false",
           "x-infered-attempts": String(result.attempts || 1)
         };
