@@ -29,7 +29,8 @@ async function executeCandidateRequest({
   apiKey,
   fetchFn = fetch,
   baseUrl = "https://api.inferhub.dev/v1",
-  timeoutMs = DEFAULT_TIMEOUT_MS
+  timeoutMs = DEFAULT_TIMEOUT_MS,
+  requestSignal = null
 }) {
   const startTime = Date.now();
   let firstTokenTime = null;
@@ -41,6 +42,18 @@ async function executeCandidateRequest({
 
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+
+  // Link the caller's abort signal: when the client disconnects, upstream work
+  // stops immediately instead of burning subrequests and billed tokens.
+  const abortFromClient = () => controller.abort();
+  if (requestSignal) {
+    if (requestSignal.aborted) controller.abort();
+    else requestSignal.addEventListener("abort", abortFromClient, { once: true });
+  }
+  // Kept attached on the streaming path so a mid-stream disconnect kills upstream too.
+  const detachClientAbort = () => {
+    if (requestSignal) requestSignal.removeEventListener("abort", abortFromClient);
+  };
 
   const headers = {
     "Content-Type": "application/json",
@@ -89,6 +102,7 @@ async function executeCandidateRequest({
     }
 
     const json = await response.json();
+    detachClientAbort();
     const totalMs = Date.now() - startTime;
     return {
       success: true,
@@ -100,10 +114,14 @@ async function executeCandidateRequest({
     };
   } catch (err) {
     clearTimeout(timeoutId);
+    detachClientAbort();
+    const clientGone = requestSignal && requestSignal.aborted;
     return {
       success: false,
-      status: 504,
-      error: err.name === "AbortError" ? "Request timed out" : err.message,
+      status: clientGone ? 499 : 504,
+      error: clientGone
+        ? "Client disconnected"
+        : (err.name === "AbortError" ? "Request timed out" : err.message),
       latencyMs: Date.now() - startTime
     };
   }
@@ -116,7 +134,8 @@ export function executeWithFallback({
   metricsStore,
   fetchFn = fetch,
   baseUrl = "https://api.inferhub.dev/v1",
-  timeoutMs = DEFAULT_TIMEOUT_MS
+  timeoutMs = DEFAULT_TIMEOUT_MS,
+  requestSignal = null
 }) {
   return (async () => {
     if (!candidates || candidates.length === 0) {
@@ -126,13 +145,17 @@ export function executeWithFallback({
     const errors = [];
 
     for (const candidate of candidates) {
+      // Don't start new upstream attempts for a caller who already left.
+      if (requestSignal && requestSignal.aborted) break;
+
       const result = await executeCandidateRequest({
         candidate,
         requestBody,
         apiKey,
         fetchFn,
         baseUrl,
-        timeoutMs
+        timeoutMs,
+        requestSignal
       });
 
       if (result.success) {
@@ -187,6 +210,17 @@ export function executeWithFallback({
           error: result.error
         });
       }
+    }
+
+    if (requestSignal && requestSignal.aborted) {
+      return {
+        success: false,
+        status: 499,
+        error: "Client disconnected before completion.",
+        selectedCandidate: candidates[0],
+        attempts: errors.length,
+        failoverErrors: errors
+      };
     }
 
     return {

@@ -79,3 +79,50 @@
       (is (= 1 (:badFailedRequests res)))
       (is (= 1 (:goodSuccessRequests res)))
       (is (= "Hello from InferHub fallback!" (:responseContent res))))))
+
+(deftest test-client-abort-propagation
+  (testing "Client disconnect aborts upstream work and skips remaining candidates"
+    (let [res (run-node-eval
+               "import { executeWithFallback } from './src/router/client.js';
+                import { createMetricsStore } from './src/router/metrics.js';
+
+                const metricsStore = createMetricsStore();
+                const ac = new AbortController();
+
+                let attempts = 0;
+                // Hangs forever until its abort signal fires (simulates a slow upstream)
+                const hangingFetch = (url, opts) => new Promise((resolve, reject) => {
+                  attempts++;
+                  opts.signal.addEventListener('abort', () => {
+                    const e = new Error('The operation was aborted');
+                    e.name = 'AbortError';
+                    reject(e);
+                  });
+                });
+
+                setTimeout(() => ac.abort(), 50);
+
+                const result = await executeWithFallback({
+                  candidates: [
+                    { providerId: 'slow-node-1', modelId: 'm1', savingsPct: 10, blendedPrice: 0.1 },
+                    { providerId: 'slow-node-2', modelId: 'm2', savingsPct: 20, blendedPrice: 0.1 }
+                  ],
+                  requestBody: { messages: [{ role: 'user', content: 'hi' }] },
+                  apiKey: 'test-key',
+                  metricsStore,
+                  fetchFn: hangingFetch,
+                  requestSignal: ac.signal,
+                  timeoutMs: 5000
+                });
+
+                console.log(JSON.stringify({
+                  success: result.success,
+                  status: result.status,
+                  error: result.error,
+                  attempts: result.attempts,
+                  upstreamStarted: attempts
+                }));")]
+      (is (false? (:success res)))
+      (is (= 499 (:status res)))
+      (is (= "Client disconnected before completion." (:error res)))
+      (is (= 1 (:upstreamStarted res)) "second candidate must be skipped after client abort"))))

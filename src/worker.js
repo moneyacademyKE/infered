@@ -303,7 +303,8 @@ export default {
           apiKey,
           metricsStore,
           fetchFn,
-          baseUrl
+          baseUrl,
+          requestSignal: request.signal
         });
 
         if (!result.success) {
