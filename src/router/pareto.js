@@ -52,9 +52,17 @@ function evaluateCascadeTier({
       const outputTokenPrice = quote.completion !== undefined ? quote.completion : quote.blendedPrice;
       const blendedPrice = quote.blendedPrice;
 
-      // Strict output token budget ceiling: Disqualify any candidate whose output token price exceeds the ceiling
+      // Strict output token budget ceiling. Two hard rules:
+      // 1. Only trade on verified spot asks — official list prices cannot prove
+      //    budget compliance, so an order book gap skips the model (with a metric)
+      //    instead of accidentally disqualifying it at $30/M.
+      // 2. NaN/malformed asks are unpriceable, therefore never budget-compliant.
       if (ceiling !== Infinity) {
-        if (outputTokenPrice > ceiling) {
+        if (quote.priceSource === "official") {
+          metricsStore.usage.officialFallbackSkips = (metricsStore.usage.officialFallbackSkips || 0) + 1;
+          continue;
+        }
+        if (!Number.isFinite(outputTokenPrice) || outputTokenPrice > ceiling) {
           continue;
         }
       }

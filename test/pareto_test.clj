@@ -109,6 +109,66 @@
       (is (:isSolExcludedWhenExpensive res))
       (is (:isKimiExcludedDueToPrice res)))))
 
+(deftest test-official-fallback-skipped-in-budget-cascade
+  (testing "Models with no live spot asks are skipped (with a metric), never silently priced at official list in a budget cascade"
+    (let [res (run-node-eval
+               "import { rankCandidates } from './src/router/pareto.js';
+                import { createPriceCache, updateSpotPrices } from './src/router/pricing.js';
+                import { createMetricsStore } from './src/router/metrics.js';
+
+                const metricsStore = createMetricsStore();
+                // Only glm-flash has live spot asks. Sol/terra/kimi/glm are absent from the order book,
+                // so they fall back to official list prices (sol $30/M output) which CANNOT prove
+                // budget compliance and must be skipped, not silently disqualified.
+                const cache = createPriceCache([]);
+                updateSpotPrices(cache, [
+                  { providerId: 'flash-node-1', modelId: 'zai/glm-5.3-flash', prompt: 0.01, completion: 0.04 }
+                ]);
+
+                const candidates = rankCandidates({
+                  model: 'infered/sol-budget',
+                  priceCache: cache,
+                  metricsStore,
+                  maxFallbackPrice: 0.10
+                });
+
+                console.log(JSON.stringify({
+                  topPick: candidates[0]?.modelId,
+                  noOfficialPricedCandidates: candidates.every(c => c.quote.priceSource !== 'official'),
+                  officialFallbackSkips: metricsStore.usage.officialFallbackSkips || 0
+                }));")]
+      (is (= "zai/glm-5.3-flash" (:topPick res)))
+      (is (:noOfficialPricedCandidates res))
+      (is (>= (:officialFallbackSkips res) 1)))))
+
+(deftest test-nan-quotes-never-budget-eligible
+  (testing "NaN/malformed asks are unpriceable and can never pass the budget ceiling (H3)"
+    (let [res (run-node-eval
+               "import { rankCandidates } from './src/router/pareto.js';
+                import { createPriceCache, updateSpotPrices } from './src/router/pricing.js';
+                import { createMetricsStore } from './src/router/metrics.js';
+
+                const metricsStore = createMetricsStore();
+                const cache = createPriceCache([]);
+                updateSpotPrices(cache, [
+                  { providerId: 'nan-node', modelId: 'cx/gpt-5.6-sol', prompt: 'garbage', completion: 'garbage' },
+                  { providerId: 'flash-node-2', modelId: 'zai/glm-5.3-flash', prompt: 0.01, completion: 0.04 }
+                ]);
+
+                const candidates = rankCandidates({
+                  model: 'infered/sol-budget',
+                  priceCache: cache,
+                  metricsStore,
+                  maxFallbackPrice: 0.10
+                });
+
+                console.log(JSON.stringify({
+                  topPick: candidates[0]?.modelId,
+                  anyNanCandidate: candidates.some(c => !Number.isFinite(c.outputTokenPrice))
+                }));")]
+      (is (= "zai/glm-5.3-flash" (:topPick res)))
+      (is (not (:anyNanCandidate res))))))
+
 (deftest test-elastic-budget-escalation-ladder
   (testing "Escalates budget ceiling from $0.10 -> $0.20 -> $0.30 -> zero-downtime fallback when output prices rise"
     (let [res (run-node-eval

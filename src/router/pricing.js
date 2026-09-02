@@ -88,6 +88,7 @@ export function updateSpotPrices(cache, quoteList) {
       completion,
       blendedPrice: blended,
       savingsPct,
+      priceSource: "spot",
       updatedAt: now
     };
 
@@ -155,6 +156,7 @@ export function getSpotQuote(cache, providerId, modelId) {
     completion: official.completion,
     blendedPrice: calculateBlendedPrice(official.prompt, official.completion),
     savingsPct: 0,
+    priceSource: "official",
     updatedAt: Date.now()
   };
 }
