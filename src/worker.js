@@ -187,19 +187,21 @@ export default {
     // Continuous SWR Market Polling: Asynchronously refresh order books if stale
     triggerBackgroundSwrSyncIfNeeded(priceCache, baseUrl, apiKey, ctx);
 
-    if (path === "/" || path === "/dashboard") {
-      return new Response(renderDashboardHtml(), {
+    if (path === "/" || path === "/analytics") {
+      if (!env?.ROUTING_DB && path === "/analytics") {
+        return jsonResponse({ error: "ROUTING_DB binding missing — decision analytics unavailable" }, 503);
+      }
+      const data = env?.ROUTING_DB
+        ? await collectAnalytics(env.ROUTING_DB)
+        : { topModels: [], switching: {}, flappingSessions: 0, totalSessions: 0, last24h: 0 };
+      return new Response(renderAnalyticsPage(data), {
         status: 200,
         headers: { "Content-Type": "text/html; charset=utf-8", ...corsHeaders() }
       });
     }
 
-    if (path === "/analytics") {
-      if (!env?.ROUTING_DB) {
-        return jsonResponse({ error: "ROUTING_DB binding missing — decision analytics unavailable" }, 503);
-      }
-      const data = await collectAnalytics(env.ROUTING_DB);
-      return new Response(renderAnalyticsPage(data), {
+    if (path === "/dashboard") {
+      return new Response(renderDashboardHtml(), {
         status: 200,
         headers: { "Content-Type": "text/html; charset=utf-8", ...corsHeaders() }
       });

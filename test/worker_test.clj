@@ -74,3 +74,32 @@
       (is (:chatSuccess res))
       (is (:savingsPct res))
       (is (:chatContent res)))))
+
+(deftest test-homepage-route-contract
+  (testing "/ serves routing analytics; /dashboard preserves the legacy ops dashboard"
+    (let [res (run-node-eval
+               "import worker from './src/worker.js';
+
+                const env = { ROUTING_DB: {
+                  prepare: (sql) => ({ sql }),
+                  batch: async (stmts) => stmts.map(() => ({ results: [] }))
+                }};
+                const ctx = { waitUntil: () => {} };
+
+                const homeRes = await worker.fetch(new Request('https://edge.infered.ai/'), env, ctx);
+                const homeHtml = await homeRes.text();
+                const legacyRes = await worker.fetch(new Request('https://edge.infered.ai/dashboard'), env, ctx);
+                const legacyHtml = await legacyRes.text();
+
+                console.log(JSON.stringify({
+                  homeStatus: homeRes.status,
+                  homeIsAnalytics: homeHtml.includes('infered routing analytics'),
+                  legacyStatus: legacyRes.status,
+                  legacyIsDashboard: legacyHtml.includes('Virtual LLM Router for InferHub'),
+                  legacyNotAnalytics: !legacyHtml.includes('infered routing analytics')
+                }));")]
+      (is (= 200 (:homeStatus res)))
+      (is (true? (:homeIsAnalytics res)) "/ should serve the routing analytics page")
+      (is (= 200 (:legacyStatus res)))
+      (is (true? (:legacyIsDashboard res)) "/dashboard should preserve the legacy dashboard")
+      (is (true? (:legacyNotAnalytics res)) "legacy dashboard must not leak analytics content"))))
