@@ -113,6 +113,20 @@ function triggerBackgroundSwrSyncIfNeeded(priceCache, baseUrl, apiKey, ctx) {
   }
 }
 
+/**
+ * Persists one routing-decision record per request to Workers Analytics Engine.
+ * In-memory metrics reset on every deploy and fragment across edge isolates;
+ * this is the durable, queryable record (SQL API over dataset "infered_routing").
+ * Absent binding (local dev) is a safe no-op.
+ */
+function recordRoutingAnalytics(env, { indexes, blobs, doubles }) {
+  try {
+    if (env?.ROUTING_ANALYTICS && typeof env.ROUTING_ANALYTICS.writeDataPoint === "function") {
+      env.ROUTING_ANALYTICS.writeDataPoint({ indexes, blobs, doubles });
+    }
+  } catch {}
+}
+
 function createStandaloneMockFetch() {
   return async (url, opts) => {
     const body = JSON.parse(opts.body || "{}");
@@ -310,6 +324,19 @@ export default {
         });
 
         if (!result.success) {
+          recordRoutingAnalytics(env, {
+            indexes: ["routing-error"],
+            blobs: [
+              requestedModel,
+              "-",
+              "-",
+              "-",
+              "-",
+              sessionId || "-",
+              String(result.failoverErrors?.[0]?.error || result.error || "unknown").slice(0, 200)
+            ],
+            doubles: [0, 0, 0, result.attempts || 0]
+          });
           return jsonResponse({
             error: {
               message: result.error,
@@ -343,6 +370,28 @@ export default {
         if (isDeterministic && cacheKey && responseBody) {
           putCachedResponse(cacheStore, cacheKey, responseBody);
         }
+
+        // Durable decision record: one row per request, queryable via the
+        // Analytics SQL API. blobs[5] carries the session id so stickiness
+        // (model pinning) can be verified against real traffic.
+        recordRoutingAnalytics(env, {
+          indexes: [selected.modelId],
+          blobs: [
+            requestedModel,
+            selected.modelId,
+            selected.providerId,
+            String(selected.budgetTier ?? "-"),
+            String(selected.escalationLevel ?? 0),
+            sessionId || "-",
+            selected.quote?.priceSource || "-"
+          ],
+          doubles: [
+            selected.savingsPct || 0,
+            result.latencyMs || 0,
+            result.ttftMs || 0,
+            result.attempts || 1
+          ]
+        });
 
         const telemetryHeaders = {
           "x-infered-cache": "MISS",
