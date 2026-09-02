@@ -39,7 +39,7 @@ function corsHeaders() {
     "Access-Control-Allow-Origin": "*",
     "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS",
     "Access-Control-Allow-Headers": "Content-Type, Authorization, X-Infered-Weights, X-Infered-Max-Price, X-Session-ID, X-Session-Affinity, X-Infered-Cache, X-InferHub-Provider",
-    "Access-Control-Expose-Headers": "x-infered-selected-model, x-infered-provider, x-infered-savings-pct, x-infered-latency-ms, x-infered-ttft-ms, x-infered-cache, x-infered-budget-tier, x-infered-escalation-level, x-infered-tool-healed"
+    "Access-Control-Expose-Headers": "x-infered-selected-model, x-infered-provider, x-infered-savings-pct, x-infered-latency-ms, x-infered-ttft-ms, x-infered-cache, x-infered-budget-tier, x-infered-escalation-level, x-infered-tool-healed, x-infered-attempts"
   };
 }
 
@@ -264,7 +264,8 @@ export default {
               "x-infered-savings-pct": "100.0",
               "x-infered-latency-ms": "1",
               "x-infered-budget-tier": "cache-hit",
-              "x-infered-escalation-level": "0"
+              "x-infered-escalation-level": "0",
+              "x-infered-attempts": "0"
             });
           }
         }
@@ -352,7 +353,8 @@ export default {
           "x-infered-ttft-ms": String(result.ttftMs || 80),
           "x-infered-budget-tier": String(selected.budgetTier || "0.10"),
           "x-infered-escalation-level": String(selected.escalationLevel !== undefined ? selected.escalationLevel : 0),
-          "x-infered-tool-healed": toolWasHealed ? "true" : "false"
+          "x-infered-tool-healed": toolWasHealed ? "true" : "false",
+          "x-infered-attempts": String(result.attempts || 1)
         };
 
         if (requestBody.stream && result.stream) {
