@@ -36,19 +36,35 @@ const HEALTH_SQL = `
          SUM(CASE WHEN ts >= datetime('now', '-1 day') THEN 1 ELSE 0 END) AS last24h
   FROM routing_decisions`;
 
+// Per-requested-chain view: the chain's own success rate, invisible in
+// TOP_MODELS_SQL because successes there are grouped by the SERVED model.
+const CHAINS_SQL = `
+  SELECT requested_model AS chain,
+         COUNT(*) AS reqs,
+         CAST(100.0 * SUM(ok) / COUNT(*) AS INT) AS okPct,
+         SUM(CASE WHEN attempts = 1 AND ok = 1 THEN 1 ELSE 0 END) AS directHits,
+         ROUND(AVG(CASE WHEN attempts > 0 THEN attempts END), 2) AS avgAttempts
+  FROM routing_decisions
+  WHERE requested_model IS NOT NULL
+  GROUP BY requested_model
+  ORDER BY reqs DESC
+  LIMIT 8`;
+
 export async function collectAnalytics(db) {
-  const [top, switching, flapping, health] = await db.batch([
+  const [top, switching, flapping, health, chains] = await db.batch([
     db.prepare(TOP_MODELS_SQL),
     db.prepare(SWITCHING_SQL),
     db.prepare(FLAPPING_SQL),
-    db.prepare(HEALTH_SQL)
+    db.prepare(HEALTH_SQL),
+    db.prepare(CHAINS_SQL)
   ]);
   return {
     topModels: top.results || [],
     switching: (switching.results || [])[0] || {},
     flappingSessions: (flapping.results || [])[0]?.sessions || 0,
     totalSessions: (health.results || [])[0]?.sessions || 0,
-    last24h: (health.results || [])[0]?.last24h || 0
+    last24h: (health.results || [])[0]?.last24h || 0,
+    chains: chains.results || []
   };
 }
 
@@ -93,5 +109,12 @@ ${modelRows}
 
 <h2>Session stickiness</h2>
 <div class="item">${check(stable)} sessions that changed model mid-flight: <span class="num">${d.flappingSessions}</span></div>
+
+<h2>Chains (requested → served)</h2>
+${d.chains.length
+    ? d.chains.map(c =>
+        `<div class="item">${check((c.okPct ?? 0) >= 95)} <strong>${c.chain}</strong>
+         <span class="num">${c.reqs}</span> reqs · ${c.okPct ?? 0}% ok · ${c.directHits || 0} direct · ${c.avgAttempts ?? "–"} avg attempts</div>`).join("")
+    : `<div class="item muted">no chain rows yet (pre-attribution decisions have no requested_model)</div>`}
 </body></html>`;
 }

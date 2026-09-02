@@ -127,9 +127,10 @@ async function recordRoutingAnalytics(env, rec) {
   try {
     if (!env?.ROUTING_DB) return;
     await env.ROUTING_DB.prepare(
-      "INSERT INTO routing_decisions (session_id, selected_model, selected_provider, escalation_level, attempts, latency_ms, cache_hit, budget_cap, ok, error) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10)"
+      "INSERT INTO routing_decisions (session_id, requested_model, selected_model, selected_provider, escalation_level, attempts, latency_ms, cache_hit, budget_cap, ok, error) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11)"
     ).bind(
       rec.sessionId ?? null,
+      rec.requestedModel ?? rec.model ?? null,
       rec.model ?? null,
       rec.provider ?? null,
       rec.escalationLevel ?? 0,
@@ -408,6 +409,7 @@ export default {
         ctx.waitUntil(recordRoutingAnalytics(env, {
           ok: true,
           model: served.modelId,
+          requestedModel,
           provider: served.providerId,
           escalationLevel: served.escalationLevel ?? 0,
           attempts: result.attempts || 1,
