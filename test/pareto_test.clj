@@ -260,3 +260,42 @@
       (is (= 1 (:tier2Escalation res)))
       (is (= 2 (:tier3Escalation res)))
       (is (:tier4ZeroDowntimeSuccess res)))))
+
+(deftest test-glm-budget-cascade-behavior
+  (testing "glm-budget routes as a budget cascade over the sol-excluded chain; sol-budget path unchanged"
+    (let [res (run-node-eval
+               "import { rankCandidates } from './src/router/pareto.js';
+                import { createPriceCache, updateSpotPrices } from './src/router/pricing.js';
+                import { createMetricsStore } from './src/router/metrics.js';
+
+                const priceCache = createPriceCache([]);
+                const metricsStore = createMetricsStore();
+
+                updateSpotPrices(priceCache, [
+                  { providerId: 'n-flash', modelId: 'zai/glm-5.3-flash', prompt: 0.03, completion: 0.05 },
+                  { providerId: 'n-glm', modelId: 'zai/glm-5.3', prompt: 0.10, completion: 0.08 },
+                  { providerId: 'n-kimi', modelId: 'ali/kimi-k3', prompt: 0.08, completion: 0.12 },
+                  { providerId: 'n-terra', modelId: 'cx/gpt-5.6-terra', prompt: 0.15, completion: 0.20 },
+                  { providerId: 'n-sol', modelId: 'cx/gpt-5.6-sol', prompt: 1.00, completion: 0.05 }
+                ]);
+
+                const glmRanked = rankCandidates({ model: 'infered/glm-budget', priceCache, metricsStore });
+                const solRanked = rankCandidates({ model: 'infered/sol-budget', priceCache, metricsStore });
+
+                console.log(JSON.stringify({
+                  glmWinner: glmRanked[0] && glmRanked[0].modelId,
+                  glmChain: glmRanked.map(c => c.modelId),
+                  glmEscalation: glmRanked[0] && glmRanked[0].escalationLevel,
+                  glmIsCascade: glmRanked[0] && typeof glmRanked[0].budgetTier === 'number',
+                  solWinner: solRanked[0] && solRanked[0].modelId
+                }));")]
+      (is (= "zai/glm-5.3-flash" (:glmWinner res))
+          "cheapest chain position under the $0.10 ceiling wins")
+      (is (not-any? #(= "cx/gpt-5.6-sol" %) (:glmChain res))
+          "sol must never appear in glm-budget candidates, even with a cheap spot ask")
+      (is (= ["zai/glm-5.3-flash" "zai/glm-5.3"] (:glmChain res))
+          "kimi (0.12) and terra (0.20) are over the $0.10 ceiling")
+      (is (= 0 (:glmEscalation res)))
+      (is (:glmIsCascade res) "must take the ordered budget-cascade path")
+      (is (= "cx/gpt-5.6-sol" (:solWinner res))
+          "refactor must not change sol-budget behavior"))))

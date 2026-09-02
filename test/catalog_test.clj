@@ -45,3 +45,21 @@
       (is (> (get-in res [:glmFlashPrice :prompt]) 0))
       (is (> (get-in res [:kimiPrice :prompt]) 0))
       (is (> (get-in res [:terraPrice :prompt]) 0)))))
+
+(deftest test-glm-budget-chain
+  (testing "glm-budget resolves to the sol-excluded cascade chain and is listed as a virtual model"
+    (let [res (run-node-eval
+               "import { resolveVirtualModel, VIRTUAL_ALIASES, CASCADE_CHAINS } from './src/router/catalog.js';
+                console.log(JSON.stringify({
+                  glmBudgetModels: resolveVirtualModel('infered/glm-budget'),
+                  isListed: Boolean(VIRTUAL_ALIASES['infered/glm-budget']),
+                  cascadeLookup: Boolean(CASCADE_CHAINS['infered/glm-budget']),
+                  solBudgetStillListed: Boolean(VIRTUAL_ALIASES['infered/sol-budget'])
+                }));")]
+      (is (= ["zai/glm-5.3-flash", "zai/glm-5.3", "ali/kimi-k3", "cx/gpt-5.6-terra"]
+             (:glmBudgetModels res)))
+      (is (not-any? #(= "cx/gpt-5.6-sol" %) (:glmBudgetModels res))
+          "glm-budget must never include sol")
+      (is (:isListed res) "must appear in VIRTUAL_ALIASES (drives /v1/models)")
+      (is (:cascadeLookup res) "must be a registered cascade chain")
+      (is (:solBudgetStillListed res) "refactor must not drop sol-budget"))))

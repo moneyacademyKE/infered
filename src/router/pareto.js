@@ -4,7 +4,7 @@
  * and progressive budget ceiling escalation ($0.10 -> $0.20 -> $0.30 -> zero-downtime fallback).
  */
 
-import { resolveVirtualModel, getModelMetadata, SOL_BUDGET_FALLBACK_CHAIN } from "./catalog.js";
+import { resolveVirtualModel, getModelMetadata, CASCADE_CHAINS } from "./catalog.js";
 import { getQuotesForModel, calculateSavingsPct } from "./pricing.js";
 import { getProviderStats, isCircuitOpen } from "./metrics.js";
 
@@ -142,9 +142,7 @@ function rankOrderedBudgetCascade({
   sessionAffinityProvider = null,
   sessionAffinityModel = null
 }) {
-  const chain = (model === "infered/sol-budget" || model === "infered/cascade")
-    ? SOL_BUDGET_FALLBACK_CHAIN
-    : resolveVirtualModel(model);
+  const chain = CASCADE_CHAINS[model] || resolveVirtualModel(model);
 
   const ladder = maxFallbackPrice !== null
     ? [maxFallbackPrice, 0.20, 0.30, Infinity].filter((v, idx, arr) => arr.indexOf(v) === idx)
@@ -186,8 +184,7 @@ export function rankCandidates({
   sessionAffinityProvider = null,
   sessionAffinityModel = null
 }) {
-  const isCascadeRequest = model === "infered/sol-budget" ||
-                           model === "infered/cascade" ||
+  const isCascadeRequest = Boolean(CASCADE_CHAINS[model]) ||
                            maxFallbackPrice !== null;
 
   if (isCascadeRequest) {

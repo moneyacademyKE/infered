@@ -136,6 +136,7 @@ export function renderDashboardHtml() {
           <label>Target Model / Policy</label>
           <select id="model-select">
             <option value="infered/sol-budget">infered/sol-budget (cx/gpt-5.6-sol &rarr; glm-flash &rarr; glm &rarr; kimi &rarr; terra &le; $0.10)</option>
+            <option value="infered/glm-budget">infered/glm-budget (glm-flash &rarr; glm &rarr; kimi &rarr; terra &le; $0.10, no sol)</option>
             <option value="infered/auto">infered/auto (Optimal Global Pareto)</option>
             <option value="infered/fast">infered/fast (Lowest TTFT: GLM-5.3-Flash, Llama 3.1 8B)</option>
             <option value="infered/smart">infered/smart (GPT-5.6 Terra, GLM-5.3, Claude 3.5 Sonnet)</option>

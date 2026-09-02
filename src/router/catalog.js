@@ -66,11 +66,26 @@ export const SOL_BUDGET_FALLBACK_CHAIN = [
   "cx/gpt-5.6-terra"
 ];
 
+// Sol-excluded budget cascade: starts at glm-5.3-flash, never touches frontier pricing
+export const GLM_BUDGET_FALLBACK_CHAIN = [
+  "zai/glm-5.3-flash",
+  "zai/glm-5.3",
+  "ali/kimi-k3",
+  "cx/gpt-5.6-terra"
+];
+
+// Virtual models that route as ordered budget cascades. Single source of truth —
+// the router detects cascade requests by lookup here, not by string comparison.
+export const CASCADE_CHAINS = {
+  "infered/sol-budget": SOL_BUDGET_FALLBACK_CHAIN,
+  "infered/cascade": SOL_BUDGET_FALLBACK_CHAIN,
+  "infered/glm-budget": GLM_BUDGET_FALLBACK_CHAIN
+};
+
 // Virtual aliases mapping to candidate model sets
 export const VIRTUAL_ALIASES = {
   "infered/auto": Object.keys(MODEL_TIERS),
-  "infered/sol-budget": SOL_BUDGET_FALLBACK_CHAIN,
-  "infered/cascade": SOL_BUDGET_FALLBACK_CHAIN,
+  ...CASCADE_CHAINS,
   "infered/fast": ["zai/glm-5.3-flash", "llama-3.1-8b-instant", "gpt-4o-mini", "claude-3-haiku", "deepseek-v3"],
   "infered/smart": ["cx/gpt-5.6-terra", "zai/glm-5.3", "claude-3.5-sonnet", "gpt-4o", "llama-3.3-70b"],
   "infered/reasoning": ["cx/gpt-5.6-sol", "ali/kimi-k3", "deepseek-r1", "o1-preview", "o3-mini"],
