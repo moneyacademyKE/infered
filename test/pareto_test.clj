@@ -169,6 +169,43 @@
       (is (= "zai/glm-5.3-flash" (:topPick res)))
       (is (not (:anyNanCandidate res))))))
 
+(deftest test-model-affinity-pins-selection
+  (testing "Session affinity pins the MODEL (not just provider): last model stays selected while eligible"
+    (let [res (run-node-eval
+               "import { rankCandidates } from './src/router/pareto.js';
+                import { createPriceCache, updateSpotPrices } from './src/router/pricing.js';
+                import { createMetricsStore } from './src/router/metrics.js';
+
+                const metricsStore = createMetricsStore();
+                const cache = createPriceCache([]);
+                // Sol is the chain head (would normally always win), terra is a later chain position
+                updateSpotPrices(cache, [
+                  { providerId: 'sol-node-1', modelId: 'cx/gpt-5.6-sol', prompt: 0.02, completion: 0.08 },
+                  { providerId: 'terra-node-1', modelId: 'cx/gpt-5.6-terra', prompt: 0.01, completion: 0.05 }
+                ]);
+
+                const withoutAffinity = rankCandidates({
+                  model: 'infered/sol-budget',
+                  priceCache: cache,
+                  metricsStore,
+                  maxFallbackPrice: 0.10
+                });
+
+                const withAffinity = rankCandidates({
+                  model: 'infered/sol-budget',
+                  priceCache: cache,
+                  metricsStore,
+                  maxFallbackPrice: 0.10,
+                  sessionAffinityModel: 'cx/gpt-5.6-terra'
+                });
+
+                console.log(JSON.stringify({
+                  defaultPick: withoutAffinity[0]?.modelId,
+                  pinnedPick: withAffinity[0]?.modelId
+                }));")]
+      (is (= "cx/gpt-5.6-sol" (:defaultPick res)))
+      (is (= "cx/gpt-5.6-terra" (:pinnedPick res))))))
+
 (deftest test-elastic-budget-escalation-ladder
   (testing "Escalates budget ceiling from $0.10 -> $0.20 -> $0.30 -> zero-downtime fallback when output prices rise"
     (let [res (run-node-eval

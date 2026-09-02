@@ -276,7 +276,8 @@ export default {
           metricsStore,
           weights,
           maxFallbackPrice,
-          sessionAffinityProvider: sessionAffinity?.providerId
+          sessionAffinityProvider: sessionAffinity?.providerId,
+          sessionAffinityModel: sessionAffinity?.modelId
         });
 
         if (candidates.length === 0) {

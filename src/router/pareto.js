@@ -34,7 +34,8 @@ function evaluateCascadeTier({
   metricsStore,
   ceiling,
   escalationLevel,
-  sessionAffinityProvider
+  sessionAffinityProvider,
+  sessionAffinityModel
 }) {
   const candidates = [];
 
@@ -110,6 +111,17 @@ function evaluateCascadeTier({
     if (a.circuitTripped !== b.circuitTripped) {
       return a.circuitTripped ? 1 : -1;
     }
+    // Model-level session stickiness: keep the session's last model as long as it
+    // is still eligible (budget filter already applied, tripped circuits sort last).
+    // Provider affinity alone cannot stop sol<->terra identity flapping because the
+    // chainIndex comparison always outranks utility bonuses.
+    if (sessionAffinityModel) {
+      const aPins = a.modelId === sessionAffinityModel ? 0 : 1;
+      const bPins = b.modelId === sessionAffinityModel ? 0 : 1;
+      if (aPins !== bPins) {
+        return aPins - bPins;
+      }
+    }
     if (a.chainIndex !== b.chainIndex) {
       return a.chainIndex - b.chainIndex;
     }
@@ -127,7 +139,8 @@ function rankOrderedBudgetCascade({
   priceCache,
   metricsStore,
   maxFallbackPrice = null,
-  sessionAffinityProvider = null
+  sessionAffinityProvider = null,
+  sessionAffinityModel = null
 }) {
   const chain = (model === "infered/sol-budget" || model === "infered/cascade")
     ? SOL_BUDGET_FALLBACK_CHAIN
@@ -145,7 +158,8 @@ function rankOrderedBudgetCascade({
       metricsStore,
       ceiling,
       escalationLevel: level,
-      sessionAffinityProvider
+      sessionAffinityProvider,
+      sessionAffinityModel
     });
 
     const healthyCandidates = candidates.filter(c => !c.circuitTripped);
@@ -169,7 +183,8 @@ export function rankCandidates({
   metricsStore,
   weights = DEFAULT_WEIGHTS,
   maxFallbackPrice = null,
-  sessionAffinityProvider = null
+  sessionAffinityProvider = null,
+  sessionAffinityModel = null
 }) {
   const isCascadeRequest = model === "infered/sol-budget" ||
                            model === "infered/cascade" ||
@@ -181,7 +196,8 @@ export function rankCandidates({
       priceCache,
       metricsStore,
       maxFallbackPrice,
-      sessionAffinityProvider
+      sessionAffinityProvider,
+      sessionAffinityModel
     });
   }
 
@@ -233,6 +249,11 @@ export function rankCandidates({
     const speedScore = maxLat === minLat ? 1.0 : (maxLat - c.emaLatency) / (maxLat - minLat);
     const qualityScore = c.quality;
     const affinityBonus = c.hasAffinity ? CACHE_AFFINITY_BONUS : 0;
+    // Model-level stickiness on the Pareto path: a pinned model out-weighs
+    // small scoring deltas so conversational context stops changing identity.
+    const modelAffinityBonus = (sessionAffinityModel && c.modelId === sessionAffinityModel)
+      ? CACHE_AFFINITY_BONUS
+      : 0;
 
     let errorPenalty = 0;
     if (c.circuitTripped) {
@@ -245,7 +266,8 @@ export function rankCandidates({
       (weights.price * priceScore) +
       (weights.speed * speedScore) +
       (weights.quality * qualityScore) +
-      affinityBonus -
+      affinityBonus +
+      modelAffinityBonus -
       errorPenalty
     ).toFixed(4));
 
