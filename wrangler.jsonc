@@ -14,5 +14,12 @@
     "SPEED_WEIGHT": "0.2",
     "QUALITY_WEIGHT": "0.2",
     "PRICE_CACHE_TTL_SEC": "60"
-  }
+  },
+  "d1_databases": [
+    {
+      "binding": "ROUTING_DB",
+      "database_name": "infered-routing",
+      "database_id": "b8c91497-e416-4315-8dba-256f9f5652b0"
+    }
+  ]
 }

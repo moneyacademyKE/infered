@@ -13,6 +13,7 @@ import { createExemplarStore, recordToolOutcome, enrichPromptWithToolExemplars }
 import { rankCandidates, DEFAULT_WEIGHTS, ROUTING_POLICIES } from "./router/pareto.js";
 import { executeWithFallback } from "./router/client.js";
 import { renderDashboardHtml } from "./ui/dashboard.js";
+import { collectAnalytics, renderAnalyticsPage } from "./ui/analytics.js";
 
 let globalPriceCache = null;
 let globalMetricsStore = null;
@@ -119,11 +120,26 @@ function triggerBackgroundSwrSyncIfNeeded(priceCache, baseUrl, apiKey, ctx) {
  * this is the durable, queryable record (SQL API over dataset "infered_routing").
  * Absent binding (local dev) is a safe no-op.
  */
-function recordRoutingAnalytics(env, { indexes, blobs, doubles }) {
+// Durable decision record — one row per request into D1 (free tier:
+// 100k writes/day vs our ~2k; Analytics Engine is Paid-only, a nongoal).
+// Observability must never break routing: every failure is swallowed.
+async function recordRoutingAnalytics(env, rec) {
   try {
-    if (env?.ROUTING_ANALYTICS && typeof env.ROUTING_ANALYTICS.writeDataPoint === "function") {
-      env.ROUTING_ANALYTICS.writeDataPoint({ indexes, blobs, doubles });
-    }
+    if (!env?.ROUTING_DB) return;
+    await env.ROUTING_DB.prepare(
+      "INSERT INTO routing_decisions (session_id, selected_model, selected_provider, escalation_level, attempts, latency_ms, cache_hit, budget_cap, ok, error) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10)"
+    ).bind(
+      rec.sessionId ?? null,
+      rec.model ?? null,
+      rec.provider ?? null,
+      rec.escalationLevel ?? 0,
+      rec.attempts ?? 1,
+      rec.latencyMs ?? null,
+      rec.cacheHit ? 1 : 0,
+      rec.budgetCap ?? null,
+      rec.ok ? 1 : 0,
+      rec.error ?? null
+    ).run();
   } catch {}
 }
 
@@ -173,6 +189,17 @@ export default {
 
     if (path === "/" || path === "/dashboard") {
       return new Response(renderDashboardHtml(), {
+        status: 200,
+        headers: { "Content-Type": "text/html; charset=utf-8", ...corsHeaders() }
+      });
+    }
+
+    if (path === "/analytics") {
+      if (!env?.ROUTING_DB) {
+        return jsonResponse({ error: "ROUTING_DB binding missing — decision analytics unavailable" }, 503);
+      }
+      const data = await collectAnalytics(env.ROUTING_DB);
+      return new Response(renderAnalyticsPage(data), {
         status: 200,
         headers: { "Content-Type": "text/html; charset=utf-8", ...corsHeaders() }
       });
@@ -324,19 +351,14 @@ export default {
         });
 
         if (!result.success) {
-          recordRoutingAnalytics(env, {
-            indexes: ["routing-error"],
-            blobs: [
-              requestedModel,
-              "-",
-              "-",
-              "-",
-              "-",
-              sessionId || "-",
-              String(result.failoverErrors?.[0]?.error || result.error || "unknown").slice(0, 200)
-            ],
-            doubles: [0, 0, 0, result.attempts || 0]
-          });
+          ctx.waitUntil(recordRoutingAnalytics(env, {
+            ok: false,
+            model: requestedModel,
+            attempts: result.attempts || 0,
+            budgetCap: maxFallbackPrice,
+            sessionId,
+            error: String(result.failoverErrors?.[0]?.error || result.error || "unknown").slice(0, 200)
+          }));
           return jsonResponse({
             error: {
               message: result.error,
@@ -377,27 +399,20 @@ export default {
           putCachedResponse(cacheStore, cacheKey, responseBody);
         }
 
-        // Durable decision record: one row per request, queryable via the
-        // Analytics SQL API. blobs[5] carries the session id so stickiness
-        // (model pinning) can be verified against real traffic.
-        recordRoutingAnalytics(env, {
-          indexes: [served.modelId],
-          blobs: [
-            requestedModel,
-            served.modelId,
-            served.providerId,
-            String(served.budgetTier ?? "-"),
-            String(served.escalationLevel ?? 0),
-            sessionId || "-",
-            served.quote?.priceSource || "-"
-          ],
-          doubles: [
-            served.savingsPct || 0,
-            result.latencyMs || 0,
-            result.ttftMs || 0,
-            result.attempts || 1
-          ]
-        });
+        // Durable decision record: one row per request, queryable via D1 SQL.
+        // sessionId is stored so model pinning can be verified against real
+        // traffic, and the ACTUAL serving candidate is recorded — not the
+        // ranked favorite.
+        ctx.waitUntil(recordRoutingAnalytics(env, {
+          ok: true,
+          model: served.modelId,
+          provider: served.providerId,
+          escalationLevel: served.escalationLevel ?? 0,
+          attempts: result.attempts || 1,
+          latencyMs: result.latencyMs || null,
+          budgetCap: maxFallbackPrice,
+          sessionId
+        }));
 
         const telemetryHeaders = {
           "x-infered-cache": "MISS",
