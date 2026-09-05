@@ -157,3 +157,96 @@
       (is (= 1 (:insertCount res)) "exactly one decision row after the stream drains")
       (is (some? (:latency res)) "latency_ms must be recorded for streamed requests")
       (is (= 1 (:okFlag res)) "streamed request recorded as success"))))
+
+(deftest test-cache-hit-recorded
+  (testing "deterministic cache hits must record a decision row (attempts=0), not vanish"
+    (let [res (run-node-eval
+               "import worker from './src/worker.js';
+
+                const inserts = [];
+                const env = {
+                  INFERHUB_BASE_URL: 'https://api.inferhub.net/v1',
+                  ROUTING_DB: {
+                    prepare: () => ({
+                      bind: (...args) => ({ run: async () => { inserts.push(args); } })
+                    })
+                  }
+                };
+                const waits = [];
+                const ctx = { waitUntil: (p) => waits.push(p) };
+
+                const mkReq = () => new Request('https://edge.infered.ai/v1/chat/completions', {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({
+                    model: 'infered/glm-budget',
+                    temperature: 0,
+                    messages: [{ role: 'user', content: 'cache me' }]
+                  })
+                });
+
+                const r1 = await worker.fetch(mkReq(), env, ctx);
+                await r1.json();
+                const r2 = await worker.fetch(mkReq(), env, ctx);
+                await r2.json();
+                await Promise.all(waits);
+
+                console.log(JSON.stringify({
+                  firstMiss: r1.headers.get('x-infered-cache'),
+                  secondHit: r2.headers.get('x-infered-cache'),
+                  insertCount: inserts.length,
+                  // bind order: session(0), requested(1), selected(2), provider(3),
+                  // escalation(4), attempts(5), latency(6), budget(7), ok(8), error(9)
+                  secondAttempts: inserts.length > 1 ? inserts[1][5] : null,
+                  secondOk: inserts.length > 1 ? inserts[1][8] : null
+                }));")]
+      (is (= "MISS" (:firstMiss res)) "first deterministic request is a cache MISS")
+      (is (= "HIT" (:secondHit res)) "identical deterministic request hits the cache")
+      (is (= 2 (:insertCount res)) "both MISS and HIT record a decision row")
+      (is (= 0 (:secondAttempts res)) "cache hit recorded with attempts=0")
+      (is (= 1 (:secondOk res)) "cache hit recorded as success"))))
+
+(deftest test-client-disconnect-recorded
+  (testing "abandoned streams must record an ok=0 client_disconnected row, not vanish"
+    (let [res (run-node-eval
+               "import worker from './src/worker.js';
+
+                // undici quirk: cancelling a constructed Response body rejects an
+                // internal wrapper read with `undefined` (workerd handles this
+                // natively). Absorb exactly that; any real rejection still throws.
+                process.on('unhandledRejection', (r) => { if (r !== undefined) throw r; });
+
+                const inserts = [];
+                const env = {
+                  INFERHUB_BASE_URL: 'https://api.inferhub.net/v1',
+                  ROUTING_DB: {
+                    prepare: () => ({
+                      bind: (...args) => ({ run: async () => { inserts.push(args); } })
+                    })
+                  }
+                };
+                const waits = [];
+                const ctx = { waitUntil: (p) => waits.push(p) };
+
+                const req = new Request('https://edge.infered.ai/v1/chat/completions', {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({
+                    model: 'infered/glm-budget',
+                    stream: true,
+                    messages: [{ role: 'user', content: 'you will leave mid-stream' }]
+                  })
+                });
+                const res = await worker.fetch(req, env, ctx);
+                // Simulate the client hanging up before the stream drains.
+                await res.body.cancel();
+                await Promise.all(waits);
+
+                console.log(JSON.stringify({
+                  insertCount: inserts.length,
+                  okFlag: inserts.length ? inserts[0][8] : null,
+                  error: inserts.length ? inserts[0][9] : null
+                }));")]
+      (is (= 1 (:insertCount res)) "abandoned stream leaves exactly one decision row")
+      (is (= 0 (:okFlag res)) "abandoned stream recorded as failure, not fake success")
+      (is (= "client_disconnected" (:error res)) "row carries the client_disconnected error"))))

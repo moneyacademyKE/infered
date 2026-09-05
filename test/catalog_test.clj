@@ -85,3 +85,21 @@
       (is (:isListed res) "must appear in VIRTUAL_ALIASES (drives /v1/models)")
       (is (:cascadeLookup res) "must be a registered cascade chain")
       (is (:glmBudgetStillListed res) "must not disturb glm-budget"))))
+
+(deftest test-unknown-names-reroute
+  (testing "unknown model names (typos, removed models) resolve to the default budget chain, never the wide pool"
+    (let [res (run-node-eval
+               "import { resolveVirtualModel } from './src/router/catalog.js';
+                console.log(JSON.stringify({
+                  gm53Typo: resolveVirtualModel('zai/gm5.3'),
+                  rawSol: resolveVirtualModel('cx/gpt-5.6-sol'),
+                  chainMemberDirect: resolveVirtualModel('zai/glm-5.3-flash')
+                }));")]
+      ;; bind-order note: the default chain is glm-budget's four-model cascade
+      (is (= ["zai/glm-5.3-flash" "zai/glm-5.3" "ali/kimi-k3" "cx/gpt-5.6-terra"]
+             (:gm53Typo res))
+          "the famous gm5.3 typo must land on the budget chain")
+      (is (not-any? #(= "cx/gpt-5.6-sol" %) (:rawSol res))
+          "raw sol resolves to a sol-free chain")
+      (is (= ["zai/glm-5.3-flash"] (:chainMemberDirect res))
+          "chain members stay directly addressable (they are the chains)"))))

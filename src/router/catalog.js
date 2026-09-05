@@ -83,9 +83,11 @@ export const CASCADE_CHAINS = {
   "infered/astra-budget": ASTRA_BUDGET_FALLBACK_CHAIN
 };
 
-// Default requested model when the caller sends none — preserved behavior:
-// resolveVirtualModel previously fell back to the "infered/auto" alias.
-export const DEFAULT_MODEL = "infered/auto";
+// Default requested model — also where UNRECOGNIZED names land (typos like
+// "zai/gm5.3", removed models like raw sol). Unknown must mean "budget-safe
+// default chain", never the wide MODEL_TIERS pool where any quoted model can
+// win. Matches worker.js's no-model default.
+export const DEFAULT_MODEL = "infered/glm-budget";
 
 // Declared sibling-chain fallback: when a chain prices out entirely or every
 // candidate fails upstream, the executor may retry exactly once on this chain.
@@ -134,7 +136,9 @@ export function resolveVirtualModel(modelName) {
     return [cleanName];
   }
 
-  return VIRTUAL_ALIASES["infered/auto"];
+  // Unknown names resolve to the default budget chain, not the auto pool —
+  // an unrecognized model behaves exactly like no model at all.
+  return VIRTUAL_ALIASES[DEFAULT_MODEL];
 }
 
 export function getOfficialPrice(modelId) {

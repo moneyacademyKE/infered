@@ -89,10 +89,14 @@ async function executeCandidateRequest({
         firstTokenTime = Date.now();
       });
 
+      // Explicit pipeTo, not pipeThrough: a mid-stream client cancel rejects
+      // the source pipe — expected, so catch it; never an unhandled rejection.
+      response.body.pipeTo(telemetryStream.writable).catch(() => {});
+
       return {
         success: true,
         status: 200,
-        stream: response.body.pipeThrough(telemetryStream),
+        stream: telemetryStream.readable,
         getMetrics: () => {
           const totalMs = Date.now() - startTime;
           const ttftMs = firstTokenTime ? firstTokenTime - startTime : totalMs;

@@ -114,12 +114,6 @@ function triggerBackgroundSwrSyncIfNeeded(priceCache, baseUrl, apiKey, ctx) {
   }
 }
 
-/**
- * Persists one routing-decision record per request to Workers Analytics Engine.
- * In-memory metrics reset on every deploy and fragment across edge isolates;
- * this is the durable, queryable record (SQL API over dataset "infered_routing").
- * Absent binding (local dev) is a safe no-op.
- */
 // Durable decision record — one row per request into D1 (free tier:
 // 100k writes/day vs our ~2k; Analytics Engine is Paid-only, a nongoal).
 // Observability must never break routing: every failure is swallowed.
@@ -307,6 +301,17 @@ export default {
         if (isDeterministic && cacheKey) {
           const cached = getCachedResponse(cacheStore, cacheKey);
           if (cached) {
+            // Cache hits are routing decisions too: without a row, per-model
+            // analytics silently undercounts exactly the cheapest traffic.
+            ctx.waitUntil(recordRoutingAnalytics(env, {
+              ok: true,
+              model: cached.model || requestedModel,
+              requestedModel,
+              attempts: 0,
+              latencyMs: Date.now() - requestStart,
+              budgetCap: maxFallbackPrice,
+              sessionId
+            }));
             return jsonResponse(cached, 200, {
               "x-infered-cache": "HIT",
               "x-infered-selected-model": cached.model || requestedModel,
@@ -413,7 +418,7 @@ export default {
         // sessionId is stored so model pinning can be verified against real
         // traffic, and the ACTUAL serving candidate is recorded — not the
         // ranked favorite.
-        const recordDecision = (metrics) => ctx.waitUntil(recordRoutingAnalytics(env, {
+        const recordDecision = (metrics, overrides = {}) => ctx.waitUntil(recordRoutingAnalytics(env, {
           ok: true,
           model: served.modelId,
           requestedModel,
@@ -424,7 +429,8 @@ export default {
           // measurement is missing (cache-served, aborted stream flush).
           latencyMs: metrics.latencyMs || (Date.now() - requestStart),
           budgetCap: maxFallbackPrice,
-          sessionId
+          sessionId,
+          ...overrides
         }));
 
         // Streaming results carry getMetrics() — total duration is only
@@ -433,9 +439,21 @@ export default {
         let responseStream = null;
         if (result.getMetrics && result.stream) {
           const getMetrics = result.getMetrics;
-          responseStream = result.stream.pipeThrough(new TransformStream({
-            flush() { recordDecision(getMetrics()); }
-          }));
+          let recorded = false;
+          // Exactly one row per stream: flush on success, cancel on disconnect.
+          const recordOnce = (m, overrides) => {
+            if (recorded) return;
+            recorded = true;
+            recordDecision(m || {}, overrides);
+          };
+          const ts = new TransformStream({
+            flush() { recordOnce(getMetrics()); },
+            cancel() { recordOnce(null, { ok: false, error: "client_disconnected" }); }
+          });
+          // Explicit pipeTo, not pipeThrough: a mid-stream client cancel rejects
+          // the source pipe — expected, so it's caught, never unhandled.
+          responseStream = ts.readable;
+          result.stream.pipeTo(ts.writable).catch(() => {});
         } else {
           recordDecision(result);
         }
