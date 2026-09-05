@@ -25,9 +25,12 @@
       (is (:hasAliases res))
       (is (vector? (:autoModels res)))
       (is (> (count (:autoModels res)) 0))
-      (is (= ["cx/gpt-5.6-sol", "zai/glm-5.3-flash", "zai/glm-5.3", "ali/kimi-k3", "cx/gpt-5.6-terra"]
+      ;; sol removed 2026-09-05: sol-budget resolves to the glm-budget chain,
+      ;; and raw-sol requests fall through to the sol-free auto cascade.
+      (is (= ["zai/glm-5.3-flash", "zai/glm-5.3", "ali/kimi-k3", "cx/gpt-5.6-terra"]
              (:cascadeModels res)))
-      (is (= ["cx/gpt-5.6-sol"] (:solExact res))))))
+      (is (not-any? #(= "cx/gpt-5.6-sol" %) (:solExact res))
+          "removed sol must resolve to a sol-free fallback, never to itself"))))
 
 (deftest test-official-pricing
   (testing "Official pricing provides baseline for all models including 2026 frontier models"
@@ -41,7 +44,8 @@
                   hasPrices: Object.keys(OFFICIAL_PRICES).length >= 10
                 }));")]
       (is (:hasPrices res))
-      (is (> (get-in res [:solPrice :prompt]) 0))
+      ;; sol removed from catalog: lookup falls to the generic $1/$2 baseline
+      (is (= 1 (get-in res [:solPrice :prompt])))
       (is (> (get-in res [:glmFlashPrice :prompt]) 0))
       (is (> (get-in res [:kimiPrice :prompt]) 0))
       (is (> (get-in res [:terraPrice :prompt]) 0)))))

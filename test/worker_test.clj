@@ -95,7 +95,8 @@
                   homeStatus: homeRes.status,
                   homeIsAnalytics: homeHtml.includes('infered routing analytics'),
                   homeHasPrices: homeHtml.includes('live spot'),
-                  homeHasRatecardRow: homeHtml.includes('gpt-5.6-sol'),
+                  homeHasRatecardRow: homeHtml.includes('gpt-5.6-terra'),
+                  homeHasNoSol: !homeHtml.includes('gpt-5.6-sol'),
                   homeHasDollar: homeHtml.includes('$'),
                   legacyStatus: legacyRes.status,
                   legacyIsDashboard: legacyHtml.includes('Virtual LLM Router for InferHub'),
@@ -105,6 +106,7 @@
       (is (true? (:homeIsAnalytics res)) "/ should serve the routing analytics page")
       (is (true? (:homeHasPrices res)) "/ should render the Prices (list → live spot) section")
       (is (true? (:homeHasRatecardRow res)) "prices section should list ratecard models")
+      (is (true? (:homeHasNoSol res)) "removed sol must not render anywhere on the homepage")
       (is (true? (:homeHasDollar res)) "prices rows should carry $ figures")
       (is (= 200 (:legacyStatus res)))
       (is (true? (:legacyIsDashboard res)) "/dashboard should preserve the legacy dashboard")
@@ -146,9 +148,9 @@
                   drainedLen: drained.length,
                   insertCount: inserts.length,
                   // bind order: session(0), requested(1), selected(2), provider(3),
-                  // escalation(4), attempts(5), latency(6), ...
+                  // escalation(4), attempts(5), latency(6), budget(7), ok(8)
                   latency: inserts.length ? inserts[0][6] : null,
-                  okFlag: inserts.length ? inserts[0][9] : null
+                  okFlag: inserts.length ? inserts[0][8] : null
                 }));")]
       (is (:isStream res) "stream:true should get an event-stream response")
       (is (> (:drainedLen res) 0) "stream body should carry content")

@@ -57,7 +57,9 @@
                   afterSpikeModel: candAfterSpike[0]?.modelId,
                   afterSpikePrice: candAfterSpike[0]?.outputTokenPrice
                 }));")]
-      (is (= "cx/gpt-5.6-sol" (:defaultModel res)))
+      ;; sol removed from chains: the cheap sol ask in the fixture is now
+      ;; invisible to sol-budget, so flash wins even at the loose threshold.
+      (is (= "zai/glm-5.3-flash" (:defaultModel res)))
       (is (= "zai/glm-5.3-flash" (:tightModel res)))
       (is (= "zai/glm-5.3-flash" (:afterSpikeModel res)))
       (is (<= (:afterSpikePrice res) 0.10)))))

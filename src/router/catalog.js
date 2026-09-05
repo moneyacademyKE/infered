@@ -6,7 +6,6 @@
 // Model capabilities and quality benchmarks (normalized 0.0 - 1.0)
 export const MODEL_TIERS = {
   // 2026 Frontier & Agentic Models
-  "cx/gpt-5.6-sol": { tier: "frontier-reasoning", quality: 0.98, family: "openai", context: 256000 },
   "cx/gpt-5.6-terra": { tier: "balanced-frontier", quality: 0.91, family: "openai", context: 128000 },
   "zai/glm-5.3": { tier: "agentic-coding", quality: 0.93, family: "z.ai", context: 1000000 },
   "zai/glm-5.3-flash": { tier: "fast-agentic", quality: 0.85, family: "z.ai", context: 1000000 },
@@ -35,7 +34,6 @@ export const MODEL_TIERS = {
 // Official provider list prices in USD per 1M tokens [Prompt, Completion]
 export const OFFICIAL_PRICES = {
   // 2026 Frontier & Agentic Models
-  "cx/gpt-5.6-sol": { prompt: 4.00, completion: 16.00 },
   "cx/gpt-5.6-terra": { prompt: 0.30, completion: 0.90 },
   "zai/glm-5.3": { prompt: 0.20, completion: 0.40 },
   "zai/glm-5.3-flash": { prompt: 0.06, completion: 0.10 },
@@ -57,16 +55,8 @@ export const OFFICIAL_PRICES = {
   "mistral-7b-instruct": { prompt: 0.20, completion: 0.20 }
 };
 
-// Fallback cascade ordering
-export const SOL_BUDGET_FALLBACK_CHAIN = [
-  "cx/gpt-5.6-sol",
-  "zai/glm-5.3-flash",
-  "zai/glm-5.3",
-  "ali/kimi-k3",
-  "cx/gpt-5.6-terra"
-];
-
-// Sol-excluded budget cascade: starts at glm-5.3-flash, never touches frontier pricing
+// Budget cascade ordering (sol removed 2026-09-05 per owner directive —
+// upstream no_capacity made it a liability; starts at glm-5.3-flash).
 export const GLM_BUDGET_FALLBACK_CHAIN = [
   "zai/glm-5.3-flash",
   "zai/glm-5.3",
@@ -86,8 +76,9 @@ export const ASTRA_BUDGET_FALLBACK_CHAIN = [
 // Virtual models that route as ordered budget cascades. Single source of truth —
 // the router detects cascade requests by lookup here, not by string comparison.
 export const CASCADE_CHAINS = {
-  "infered/sol-budget": SOL_BUDGET_FALLBACK_CHAIN,
-  "infered/cascade": SOL_BUDGET_FALLBACK_CHAIN,
+  // Legacy policy names preserved for callers — every chain is sol-free now.
+  "infered/sol-budget": GLM_BUDGET_FALLBACK_CHAIN,
+  "infered/cascade": GLM_BUDGET_FALLBACK_CHAIN,
   "infered/glm-budget": GLM_BUDGET_FALLBACK_CHAIN,
   "infered/astra-budget": ASTRA_BUDGET_FALLBACK_CHAIN
 };
@@ -100,7 +91,8 @@ export const DEFAULT_MODEL = "infered/auto";
 // candidate fails upstream, the executor may retry exactly once on this chain.
 // Terminal chains simply have no entry (no fallback, no loop).
 export const CHAIN_FALLBACKS = {
-  "infered/sol-budget": "infered/glm-budget",
+  // infered/sol-budget is terminal — its chain is identical to glm-budget's,
+  // so a sibling retry would just re-run the same four models.
   "infered/glm-budget": "infered/auto",
   "infered/astra-budget": "infered/auto"
 };
@@ -111,11 +103,10 @@ export const VIRTUAL_ALIASES = {
   ...CASCADE_CHAINS,
   "infered/fast": ["zai/glm-5.3-flash", "llama-3.1-8b-instant", "gpt-4o-mini", "claude-3-haiku", "deepseek-v3"],
   "infered/smart": ["cx/gpt-5.6-terra", "zai/glm-5.3", "claude-3.5-sonnet", "gpt-4o", "llama-3.3-70b"],
-  "infered/reasoning": ["cx/gpt-5.6-sol", "ali/kimi-k3", "deepseek-r1", "o1-preview", "o3-mini"],
+  "infered/reasoning": ["cx/gpt-5.6-terra", "ali/kimi-k3", "deepseek-r1", "o1-preview", "o3-mini"],
   "infered/cheap": ["zai/glm-5.3-flash", "llama-3.1-8b-instant", "deepseek-v3", "gpt-4o-mini"],
   
   // Specific virtual models
-  "infered/cx/gpt-5.6-sol": ["cx/gpt-5.6-sol"],
   "infered/zai/glm-5.3-flash": ["zai/glm-5.3-flash"],
   "infered/zai/glm-5.3": ["zai/glm-5.3"],
   "infered/ali/kimi-k3": ["ali/kimi-k3"],

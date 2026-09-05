@@ -17,7 +17,6 @@
                 const blended = calculateBlendedPrice(0.01, 0.06);
                 const cache = createPriceCache();
 
-                const solQuotes = getQuotesForModel(cache, 'cx/gpt-5.6-sol');
                 const flashQuotes = getQuotesForModel(cache, 'zai/glm-5.3-flash');
                 const glmQuotes = getQuotesForModel(cache, 'zai/glm-5.3');
                 const terraQuotes = getQuotesForModel(cache, 'cx/gpt-5.6-terra');
@@ -25,17 +24,13 @@
 
                 console.log(JSON.stringify({
                   blended,
-                  solOutput: solQuotes[0].completion,
-                  solSavingsPct: solQuotes[0].savingsPct,
                   flashOutput: flashQuotes[0].completion,
                   glmOutput: glmQuotes[0].completion,
                   terraOutput: terraQuotes[0].completion,
                   kimiOutput: kimiQuotes[0].completion,
-                  allUnderTenCents: [solQuotes[0], flashQuotes[0], glmQuotes[0], terraQuotes[0], kimiQuotes[0]].every(q => q.completion <= 0.10)
+                  allUnderTenCents: [flashQuotes[0], glmQuotes[0], terraQuotes[0], kimiQuotes[0]].every(q => q.completion <= 0.10)
                 }));")]
       (is (= 0.0475 (:blended res)))
-      (is (<= (:solOutput res) 0.10))
-      (is (> (:solSavingsPct res) 95))
       (is (<= (:flashOutput res) 0.10))
       (is (<= (:glmOutput res) 0.10))
       (is (<= (:terraOutput res) 0.10))
@@ -86,21 +81,24 @@
 
                 const rc = buildRatecard();
                 const sol = rc.find(r => r.modelId === 'cx/gpt-5.6-sol');
+                const terra = rc.find(r => r.modelId === 'cx/gpt-5.6-terra');
                 const mini = rc.find(r => r.modelId === 'gpt-4o-mini');
                 console.log(JSON.stringify({
                   count: rc.length,
                   officialCount: Object.keys(OFFICIAL_PRICES).length,
-                  solPresent: Boolean(sol),
-                  solCalibrated: sol ? sol.calibrated === true : null,
-                  solBlendedConsistent: sol ? sol.blended === calculateBlendedPrice(sol.prompt, sol.completion) : null,
+                  solAbsent: !rc.some(r => r.modelId === 'cx/gpt-5.6-sol'),
+                  terraPresent: Boolean(terra),
+                  terraCalibrated: terra ? terra.calibrated === true : null,
+                  terraBlendedConsistent: terra ? terra.blended === calculateBlendedPrice(terra.prompt, terra.completion) : null,
                   miniPresent: Boolean(mini),
                   miniUncalibrated: mini ? mini.calibrated === false : null,
                   allWellFormed: rc.every(r => typeof r.blended === 'number' && r.blended >= 0 && typeof r.calibrated === 'boolean')
                 }));")]
       (is (= (:count res) (:officialCount res)) "ratecard must cover every official model")
-      (is (true? (:solPresent res)))
-      (is (true? (:solCalibrated res)) "sol has a calibrated multiplier")
-      (is (true? (:solBlendedConsistent res)))
+      (is (true? (:solAbsent res)) "removed sol must not appear in the ratecard")
+      (is (true? (:terraPresent res)))
+      (is (true? (:terraCalibrated res)) "terra has a calibrated multiplier")
+      (is (true? (:terraBlendedConsistent res)))
       (is (true? (:miniPresent res)))
       (is (true? (:miniUncalibrated res)) "models without multipliers are flagged uncalibrated")
       (is (true? (:allWellFormed res))))))

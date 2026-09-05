@@ -127,7 +127,7 @@ async function recordRoutingAnalytics(env, rec) {
   try {
     if (!env?.ROUTING_DB) return;
     await env.ROUTING_DB.prepare(
-      "INSERT INTO routing_decisions (session_id, requested_model, selected_model, selected_provider, escalation_level, attempts, latency_ms, cache_hit, budget_cap, ok, error) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11)"
+      "INSERT INTO routing_decisions (session_id, requested_model, selected_model, selected_provider, escalation_level, attempts, latency_ms, budget_cap, ok, error) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10)"
     ).bind(
       rec.sessionId ?? null,
       rec.requestedModel ?? rec.model ?? null,
@@ -136,7 +136,6 @@ async function recordRoutingAnalytics(env, rec) {
       rec.escalationLevel ?? 0,
       rec.attempts ?? 1,
       rec.latencyMs ?? null,
-      rec.cacheHit ? 1 : 0,
       rec.budgetCap ?? null,
       rec.ok ? 1 : 0,
       rec.error ?? null
@@ -148,7 +147,7 @@ function createStandaloneMockFetch() {
   return async (url, opts) => {
     const body = JSON.parse(opts.body || "{}");
     const prov = opts.headers["X-InferHub-Provider"] || "mock-node";
-    const model = body.model || "cx/gpt-5.6-sol";
+    const model = body.model || "zai/glm-5.3-flash";
     const prompt = body.messages?.[body.messages.length - 1]?.content || "Hello";
 
     return new Response(JSON.stringify({
@@ -292,7 +291,9 @@ export default {
     if (path === "/v1/chat/completions" && request.method === "POST") {
       try {
         let requestBody = await request.json();
-        const requestedModel = requestBody.model || "infered/sol-budget";
+        const requestStart = Date.now();
+        // Sol removed 2026-09-05 (owner directive) — glm-budget is the default chain.
+        const requestedModel = requestBody.model || "infered/glm-budget";
         const { weights, maxFallbackPrice } = parseWeightsAndBudget(request, requestBody, env, url);
 
         // 1. Session affinity check
@@ -360,7 +361,9 @@ export default {
         if (!result.success) {
           ctx.waitUntil(recordRoutingAnalytics(env, {
             ok: false,
-            model: requestedModel,
+            // No `model` here: a failed request never selected anything, so
+            // selected_model stays NULL instead of leaking the chain name.
+            requestedModel,
             attempts: result.attempts || 0,
             budgetCap: maxFallbackPrice,
             sessionId,
@@ -417,7 +420,9 @@ export default {
           provider: served.providerId,
           escalationLevel: served.escalationLevel ?? 0,
           attempts: result.attempts || 1,
-          latencyMs: metrics.latencyMs || null,
+          // Wall-clock fallback: covers any shape where the executor's own
+          // measurement is missing (cache-served, aborted stream flush).
+          latencyMs: metrics.latencyMs || (Date.now() - requestStart),
           budgetCap: maxFallbackPrice,
           sessionId
         }));

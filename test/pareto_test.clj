@@ -57,7 +57,7 @@
       (is (> (:cheapWinnerSavings res) 50)))))
 
 (deftest test-sol-budget-cascade-policy
-  (testing "Sol budget cascade routes to cx/gpt-5.6-sol when <= $0.10, but switches down to glm-5.3-flash when Sol is > $0.10"
+  (testing "Sol removed 2026-09-05: sol-budget chain never routes sol, even when cheap sol asks sit in the order book"
     (let [res (run-node-eval
                "import { rankCandidates } from './src/router/pareto.js';
                 import { createPriceCache, updateSpotPrices } from './src/router/pricing.js';
@@ -66,7 +66,7 @@
                 const priceCacheCheapSol = createPriceCache([]);
                 const metricsStore = createMetricsStore();
 
-                // Sol is cheap: $0.08 <= $0.10
+                // Sol is cheap: $0.08 <= $0.10 — yet must be invisible to the chain
                 updateSpotPrices(priceCacheCheapSol, [
                   { providerId: 'sol-node-1', modelId: 'cx/gpt-5.6-sol', prompt: 0.02, completion: 0.08 },
                   { providerId: 'flash-node-1', modelId: 'zai/glm-5.3-flash', prompt: 0.01, completion: 0.04 }
@@ -78,7 +78,7 @@
                   maxFallbackPrice: 0.10
                 });
 
-                // Sol is expensive: $13.50 > $0.10 -> must switch down to GLM-Flash
+                // Expensive sol likewise: chain candidates never include it
                 const priceCacheExpensiveSol = createPriceCache([]);
                 updateSpotPrices(priceCacheExpensiveSol, [
                   { providerId: 'sol-node-2', modelId: 'cx/gpt-5.6-sol', prompt: 2.25, completion: 13.50 },
@@ -99,13 +99,15 @@
                   firstChoiceWhenSolExpensive: candidatesSolExpensive[0]?.modelId,
                   secondChoiceWhenSolExpensive: candidatesSolExpensive[1]?.modelId,
                   thirdChoiceWhenSolExpensive: candidatesSolExpensive[2]?.modelId,
+                  isSolExcludedWhenCheap: !candidatesSolCheap.some(c => c.modelId === 'cx/gpt-5.6-sol'),
                   isSolExcludedWhenExpensive: !candidatesSolExpensive.some(c => c.modelId === 'cx/gpt-5.6-sol'),
                   isKimiExcludedDueToPrice: !candidatesSolExpensive.some(c => c.modelId === 'ali/kimi-k3')
                 }));")]
-      (is (= "cx/gpt-5.6-sol" (:firstChoiceWhenSolCheap res)))
+      (is (= "zai/glm-5.3-flash" (:firstChoiceWhenSolCheap res)))
       (is (= "zai/glm-5.3-flash" (:firstChoiceWhenSolExpensive res)))
       (is (= "zai/glm-5.3" (:secondChoiceWhenSolExpensive res)))
       (is (= "cx/gpt-5.6-terra" (:thirdChoiceWhenSolExpensive res)))
+      (is (:isSolExcludedWhenCheap res) "cheap sol asks must not resurrect sol")
       (is (:isSolExcludedWhenExpensive res))
       (is (:isKimiExcludedDueToPrice res)))))
 
@@ -178,9 +180,9 @@
 
                 const metricsStore = createMetricsStore();
                 const cache = createPriceCache([]);
-                // Sol is the chain head (would normally always win), terra is a later chain position
+                // Flash is the chain head (would normally always win), terra is a later chain position
                 updateSpotPrices(cache, [
-                  { providerId: 'sol-node-1', modelId: 'cx/gpt-5.6-sol', prompt: 0.02, completion: 0.08 },
+                  { providerId: 'flash-node-1', modelId: 'zai/glm-5.3-flash', prompt: 0.01, completion: 0.04 },
                   { providerId: 'terra-node-1', modelId: 'cx/gpt-5.6-terra', prompt: 0.01, completion: 0.05 }
                 ]);
 
@@ -203,7 +205,7 @@
                   defaultPick: withoutAffinity[0]?.modelId,
                   pinnedPick: withAffinity[0]?.modelId
                 }));")]
-      (is (= "cx/gpt-5.6-sol" (:defaultPick res)))
+      (is (= "zai/glm-5.3-flash" (:defaultPick res)))
       (is (= "cx/gpt-5.6-terra" (:pinnedPick res))))))
 
 (deftest test-elastic-budget-escalation-ladder
@@ -262,7 +264,7 @@
       (is (:tier4ZeroDowntimeSuccess res)))))
 
 (deftest test-glm-budget-cascade-behavior
-  (testing "glm-budget routes as a budget cascade over the sol-excluded chain; sol-budget path unchanged"
+  (testing "glm-budget routes as a budget cascade over the sol-free chain; sol-budget is the same chain now"
     (let [res (run-node-eval
                "import { rankCandidates } from './src/router/pareto.js';
                 import { createPriceCache, updateSpotPrices } from './src/router/pricing.js';
@@ -293,12 +295,12 @@
           "cheapest chain position under the $0.10 ceiling wins")
       (is (not-any? #(= "cx/gpt-5.6-sol" %) (:glmChain res))
           "sol must never appear in glm-budget candidates, even with a cheap spot ask")
+      (is (= "zai/glm-5.3-flash" (:solWinner res))
+          "sol-budget resolves to the same sol-free chain — cheap sol asks stay invisible")
       (is (= ["zai/glm-5.3-flash" "zai/glm-5.3"] (:glmChain res))
           "kimi (0.12) and terra (0.20) are over the $0.10 ceiling")
       (is (= 0 (:glmEscalation res)))
-      (is (:glmIsCascade res) "must take the ordered budget-cascade path")
-      (is (= "cx/gpt-5.6-sol" (:solWinner res))
-          "refactor must not change sol-budget behavior"))))
+      (is (:glmIsCascade res) "must take the ordered budget-cascade path"))))
 
 (deftest test-astra-budget-cascade-behavior
   (testing "astra-budget defers an unquoted head and promotes it once the market lists it"

@@ -96,7 +96,7 @@ export function renderDashboardHtml() {
       </div>
       <div class="stat-card">
         <div class="stat-label">Cascade Policy</div>
-        <div class="stat-value" style="font-size: 1.2rem; color: var(--cyan);">Sol &rarr; Flash &rarr; GLM &rarr; Kimi &rarr; Terra</div>
+        <div class="stat-value" style="font-size: 1.2rem; color: var(--cyan);">Flash &rarr; GLM &rarr; Kimi &rarr; Terra</div>
         <div class="stat-sub">Strict Budget Ceiling &le; $0.10 / 1M</div>
       </div>
       <div class="stat-card">
@@ -135,15 +135,14 @@ export function renderDashboardHtml() {
         <div class="form-group">
           <label>Target Model / Policy</label>
           <select id="model-select">
-            <option value="infered/sol-budget">infered/sol-budget (cx/gpt-5.6-sol &rarr; glm-flash &rarr; glm &rarr; kimi &rarr; terra &le; $0.10)</option>
+            <option value="infered/sol-budget">infered/sol-budget (glm-flash &rarr; glm &rarr; kimi &rarr; terra &le; $0.10, sol removed)</option>
             <option value="infered/glm-budget">infered/glm-budget (glm-flash &rarr; glm &rarr; kimi &rarr; terra &le; $0.10, no sol)</option>
             <option value="infered/astra-budget">infered/astra-budget (astra &rarr; glm &rarr; kimi &le; $0.10)</option>
             <option value="infered/auto">infered/auto (Optimal Global Pareto)</option>
             <option value="infered/fast">infered/fast (Lowest TTFT: GLM-5.3-Flash, Llama 3.1 8B)</option>
             <option value="infered/smart">infered/smart (GPT-5.6 Terra, GLM-5.3, Claude 3.5 Sonnet)</option>
-            <option value="infered/reasoning">infered/reasoning (GPT-5.6 Sol, Kimi K3, DeepSeek R1)</option>
+            <option value="infered/reasoning">infered/reasoning (GPT-5.6 Terra, Kimi K3, DeepSeek R1)</option>
             <option value="infered/cheap">infered/cheap (Maximum Discount Spot Nodes)</option>
-            <option value="cx/gpt-5.6-sol">cx/gpt-5.6-sol (Direct Auto Spot Node)</option>
             <option value="zai/glm-5.3-flash">zai/glm-5.3-flash (Direct Auto Spot Node)</option>
           </select>
         </div>
