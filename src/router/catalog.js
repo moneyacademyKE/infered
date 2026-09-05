@@ -79,7 +79,7 @@ export const GLM_BUDGET_FALLBACK_CHAIN = [
 // unquoted models, so zai/kimi carry traffic until then).
 export const ASTRA_BUDGET_FALLBACK_CHAIN = [
   "cx/gpt-6-astra",
-  "zai/glm-5.3",
+  "zai/glm-5.3-flash",
   "ali/kimi-k3"
 ];
 

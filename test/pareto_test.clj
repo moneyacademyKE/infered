@@ -312,7 +312,7 @@
                 // Scenario 1 — today's live market: no astra quotes anywhere
                 const noAstra = createPriceCache([]);
                 updateSpotPrices(noAstra, [
-                  { providerId: 'n-glm', modelId: 'zai/glm-5.3', prompt: 0.10, completion: 0.08 },
+                  { providerId: 'n-glm', modelId: 'zai/glm-5.3-flash', prompt: 0.10, completion: 0.08 },
                   { providerId: 'n-kimi', modelId: 'ali/kimi-k3', prompt: 0.08, completion: 0.12 }
                 ]);
                 const deferred = rankCandidates({ model: 'infered/astra-budget', priceCache: noAstra, metricsStore });
@@ -321,7 +321,7 @@
                 const withAstra = createPriceCache([]);
                 updateSpotPrices(withAstra, [
                   { providerId: 'n-astra', modelId: 'cx/gpt-6-astra', prompt: 0.50, completion: 0.08 },
-                  { providerId: 'n-glm', modelId: 'zai/glm-5.3', prompt: 0.10, completion: 0.08 },
+                  { providerId: 'n-glm', modelId: 'zai/glm-5.3-flash', prompt: 0.10, completion: 0.08 },
                   { providerId: 'n-kimi', modelId: 'ali/kimi-k3', prompt: 0.08, completion: 0.12 }
                 ]);
                 const promoted = rankCandidates({ model: 'infered/astra-budget', priceCache: withAstra, metricsStore });
@@ -332,11 +332,11 @@
                   deferredIsCascade: deferred[0] && typeof deferred[0].budgetTier === 'number',
                   promotedWinner: promoted[0] && promoted[0].modelId
                 }));")]
-      (is (= "zai/glm-5.3" (:deferredWinner res))
+      (is (= "zai/glm-5.3-flash" (:deferredWinner res))
           "unquoted head is skipped; next chain position carries traffic")
       (is (not-any? #(= "cx/gpt-6-astra" %) (:deferredChain res))
           "astra must not appear as a candidate without verified spot asks")
-      (is (= ["zai/glm-5.3"] (:deferredChain res))
+      (is (= ["zai/glm-5.3-flash"] (:deferredChain res))
           "kimi (0.12 completion) is over the $0.10 ceiling at tier 0")
       (is (:deferredIsCascade res) "must take the ordered budget-cascade path")
       (is (= "cx/gpt-6-astra" (:promotedWinner res))
