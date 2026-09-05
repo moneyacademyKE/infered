@@ -74,12 +74,22 @@ export const GLM_BUDGET_FALLBACK_CHAIN = [
   "cx/gpt-5.6-terra"
 ];
 
+// Astra-headed budget cascade: the head activates automatically once
+// cx/gpt-6-astra lists live spot asks on InferHub (eligibility skips
+// unquoted models, so zai/kimi carry traffic until then).
+export const ASTRA_BUDGET_FALLBACK_CHAIN = [
+  "cx/gpt-6-astra",
+  "zai/glm-5.3",
+  "ali/kimi-k3"
+];
+
 // Virtual models that route as ordered budget cascades. Single source of truth —
 // the router detects cascade requests by lookup here, not by string comparison.
 export const CASCADE_CHAINS = {
   "infered/sol-budget": SOL_BUDGET_FALLBACK_CHAIN,
   "infered/cascade": SOL_BUDGET_FALLBACK_CHAIN,
-  "infered/glm-budget": GLM_BUDGET_FALLBACK_CHAIN
+  "infered/glm-budget": GLM_BUDGET_FALLBACK_CHAIN,
+  "infered/astra-budget": ASTRA_BUDGET_FALLBACK_CHAIN
 };
 
 // Default requested model when the caller sends none — preserved behavior:
@@ -91,7 +101,8 @@ export const DEFAULT_MODEL = "infered/auto";
 // Terminal chains simply have no entry (no fallback, no loop).
 export const CHAIN_FALLBACKS = {
   "infered/sol-budget": "infered/glm-budget",
-  "infered/glm-budget": "infered/auto"
+  "infered/glm-budget": "infered/auto",
+  "infered/astra-budget": "infered/auto"
 };
 
 // Virtual aliases mapping to candidate model sets

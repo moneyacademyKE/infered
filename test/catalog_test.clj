@@ -63,3 +63,21 @@
       (is (:isListed res) "must appear in VIRTUAL_ALIASES (drives /v1/models)")
       (is (:cascadeLookup res) "must be a registered cascade chain")
       (is (:solBudgetStillListed res) "refactor must not drop sol-budget"))))
+
+(deftest test-astra-budget-chain
+  (testing "astra-budget resolves to the astra-headed chain; gm5.3 typo must never appear"
+    (let [res (run-node-eval
+               "import { resolveVirtualModel, VIRTUAL_ALIASES, CASCADE_CHAINS } from './src/router/catalog.js';
+                console.log(JSON.stringify({
+                  astraBudgetModels: resolveVirtualModel('infered/astra-budget'),
+                  isListed: Boolean(VIRTUAL_ALIASES['infered/astra-budget']),
+                  cascadeLookup: Boolean(CASCADE_CHAINS['infered/astra-budget']),
+                  glmBudgetStillListed: Boolean(VIRTUAL_ALIASES['infered/glm-budget'])
+                }));")]
+      (is (= ["cx/gpt-6-astra", "zai/glm-5.3", "ali/kimi-k3"]
+             (:astraBudgetModels res)))
+      (is (not-any? #(= "zai/gm5.3" %) (:astraBudgetModels res))
+          "gm5.3 does not exist on the market; chain must use zai/glm-5.3")
+      (is (:isListed res) "must appear in VIRTUAL_ALIASES (drives /v1/models)")
+      (is (:cascadeLookup res) "must be a registered cascade chain")
+      (is (:glmBudgetStillListed res) "must not disturb glm-budget"))))
