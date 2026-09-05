@@ -1,6 +1,7 @@
 (ns worker-test
   (:require [clojure.test :refer [deftest is testing]]
             [clojure.java.shell :refer [sh]]
+            [clojure.string :as str]
             [cheshire.core :as json]))
 
 (defn run-node-eval [js-code]
@@ -78,7 +79,7 @@
       (is (:chatContent res)))))
 
 (deftest test-homepage-route-contract
-  (testing "/ serves routing analytics; /dashboard preserves the legacy ops dashboard"
+  (testing "/ serves routing analytics; /dashboard redirects to it (dashboard retired)"
     (let [res (run-node-eval
                "import worker from './src/worker.js';
 
@@ -91,7 +92,6 @@
                 const homeRes = await worker.fetch(new Request('https://edge.infered.ai/'), env, ctx);
                 const homeHtml = await homeRes.text();
                 const legacyRes = await worker.fetch(new Request('https://edge.infered.ai/dashboard'), env, ctx);
-                const legacyHtml = await legacyRes.text();
 
                 console.log(JSON.stringify({
                   homeStatus: homeRes.status,
@@ -101,8 +101,7 @@
                   homeHasNoSol: !homeHtml.includes('gpt-5.6-sol'),
                   homeHasDollar: homeHtml.includes('$'),
                   legacyStatus: legacyRes.status,
-                  legacyIsDashboard: legacyHtml.includes('Virtual LLM Router for InferHub'),
-                  legacyNotAnalytics: !legacyHtml.includes('infered routing analytics')
+                  legacyLocation: legacyRes.headers.get('location') || ''
                 }));")]
       (is (= 200 (:homeStatus res)))
       (is (true? (:homeIsAnalytics res)) "/ should serve the routing analytics page")
@@ -110,9 +109,8 @@
       (is (true? (:homeHasRatecardRow res)) "prices section should list ratecard models")
       (is (true? (:homeHasNoSol res)) "removed sol must not render anywhere on the homepage")
       (is (true? (:homeHasDollar res)) "prices rows should carry $ figures")
-      (is (= 200 (:legacyStatus res)))
-      (is (true? (:legacyIsDashboard res)) "/dashboard should preserve the legacy dashboard")
-      (is (true? (:legacyNotAnalytics res)) "legacy dashboard must not leak analytics content"))))
+      (is (= 302 (:legacyStatus res)) "/dashboard redirects after retirement")
+      (is (str/ends-with? (str (:legacyLocation res)) "/") "redirect targets the analytics homepage"))))
 
 (deftest test-streaming-latency-recorded
   (testing "streamed requests must record a real latency_ms, not null"

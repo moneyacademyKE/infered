@@ -101,3 +101,33 @@
       (is (true? (:kimiPresent res)))
       (is (true? (:allCalibrated res)) "slimmed catalog: every remaining model is calibrated")
       (is (true? (:allWellFormed res))))))
+
+(deftest test-orderbook-eviction-and-stable-nodes
+  (testing "stale inferhub nodes are evicted on ingest; unchanged asks keep their node id (H4)"
+    (let [res (run-node-eval
+               "import { createPriceCache, ingestInferHubModelsResponse, getQuotesForModel } from './src/router/pricing.js';
+
+                const cache = createPriceCache([]);
+                const v1 = { data: [{ id: 'zai/glm-5.3-flash', pricing: { asks_in: [0.010, 0.015], asks_out: [0.040, 0.050] } }] };
+                const v2 = { data: [{ id: 'zai/glm-5.3-flash', pricing: { asks_in: [0.010], asks_out: [0.040] } }] };
+                const v3 = { data: [{ id: 'zai/glm-5.3-flash', pricing: { asks_in: [0.010, 0.020], asks_out: [0.040, 0.060] } }] };
+
+                ingestInferHubModelsResponse(cache, v1);
+                const afterV1 = getQuotesForModel(cache, 'zai/glm-5.3-flash').map(q => q.providerId);
+
+                ingestInferHubModelsResponse(cache, v2);
+                const afterV2 = getQuotesForModel(cache, 'zai/glm-5.3-flash').map(q => q.providerId);
+
+                ingestInferHubModelsResponse(cache, v3);
+                const afterV3 = getQuotesForModel(cache, 'zai/glm-5.3-flash').map(q => q.providerId);
+
+                console.log(JSON.stringify({
+                  v1Count: afterV1.length,
+                  v2Count: afterV2.length,
+                  v3Count: afterV3.length,
+                  stableIdSurvives: afterV3.includes(afterV2[0])
+                }));")]
+      (is (= 2 (:v1Count res)))
+      (is (= 1 (:v2Count res)) "ghost node from v1 is evicted when the market shrinks")
+      (is (= 2 (:v3Count res)))
+      (is (:stableIdSurvives res) "unchanged ask keeps its node id across syncs (breaker history survives)"))))

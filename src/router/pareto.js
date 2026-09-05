@@ -19,7 +19,7 @@ export const ROUTING_POLICIES = {
   "cost-optimized": { price: 0.8, speed: 0.1, quality: 0.1 },
   "speed-first": { price: 0.1, speed: 0.8, quality: 0.1 },
   "quality-first": { price: 0.1, speed: 0.2, quality: 0.7 },
-  "sol-budget-cascade": { price: 0.6, speed: 0.2, quality: 0.2, maxFallbackPrice: 0.10 }
+  "budget-cascade": { price: 0.6, speed: 0.2, quality: 0.2, maxFallbackPrice: 0.10 }
 };
 
 const CACHE_AFFINITY_BONUS = 0.25;
@@ -281,27 +281,4 @@ export function rankCandidates({
 
   scored.sort((a, b) => b.utility - a.utility);
   return scored;
-}
-
-export function findParetoFrontier(candidates) {
-  const frontier = [];
-  for (const c1 of candidates) {
-    let isDominated = false;
-    for (const c2 of candidates) {
-      if (c1 === c2) continue;
-      const priceBetter = c2.blendedPrice <= c1.blendedPrice;
-      const speedBetter = c2.emaLatency <= c1.emaLatency;
-      const qualityBetter = c2.quality >= c1.quality;
-      const strictlyBetter = (c2.blendedPrice < c1.blendedPrice) ||
-                             (c2.emaLatency < c1.emaLatency) ||
-                             (c2.quality > c1.quality);
-
-      if (priceBetter && speedBetter && qualityBetter && strictlyBetter && !c2.circuitTripped) {
-        isDominated = true;
-        break;
-      }
-    }
-    if (!isDominated) frontier.push(c1);
-  }
-  return frontier;
 }

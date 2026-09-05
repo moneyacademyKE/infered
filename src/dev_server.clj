@@ -6,7 +6,7 @@
 (println "🚀 STARTING INFERED LOCAL CLOUDFLARE WORKERS SERVER 🚀")
 (println "==========================================================")
 (println "Port: http://localhost:8787")
-(println "Web Dashboard: http://localhost:8787/dashboard")
+(println "Router homepage: http://localhost:8787/")
 (println "OpenAI Proxy:  http://localhost:8787/v1/chat/completions")
 (println "Health Check:  http://localhost:8787/v1/health")
 (println "Metrics:       http://localhost:8787/v1/metrics")

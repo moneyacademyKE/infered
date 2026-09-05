@@ -8,7 +8,7 @@
   ],
   "vars": {
     "INFERHUB_BASE_URL": "https://api.inferhub.dev/v1",
-    "ROUTING_POLICY": "sol-budget-cascade",
+    "ROUTING_POLICY": "budget-cascade",
     "MAX_FALLBACK_PRICE": "0.10",
     "PRICE_WEIGHT": "0.6",
     "SPEED_WEIGHT": "0.2",

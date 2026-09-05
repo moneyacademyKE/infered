@@ -105,6 +105,7 @@ export function updateSpotPrices(cache, quoteList) {
 export function ingestInferHubModelsResponse(cache, apiResponse) {
   const modelsData = apiResponse?.data || (Array.isArray(apiResponse) ? apiResponse : []);
   const quoteList = [];
+  const freshKeysByModel = new Map();
 
   for (const m of modelsData) {
     const modelId = m.id;
@@ -118,7 +119,14 @@ export function ingestInferHubModelsResponse(cache, apiResponse) {
     for (let i = 0; i < askCount; i++) {
       const pIn = asksIn[i] !== undefined ? asksIn[i] : (pricing.min_ask_in || pricing.official_in);
       const pOut = asksOut[i] !== undefined ? asksOut[i] : (pricing.min_ask_out || pricing.official_out);
-      const provId = `inferhub-node-${i + 1}`;
+      const provId = getInferHubNodeId(modelId, pIn, pOut);
+
+      let freshKeys = freshKeysByModel.get(modelId);
+      if (!freshKeys) {
+        freshKeys = new Set();
+        freshKeysByModel.set(modelId, freshKeys);
+      }
+      freshKeys.add(getQuoteKey(provId, modelId));
 
       quoteList.push({
         providerId: provId,
@@ -133,9 +141,37 @@ export function ingestInferHubModelsResponse(cache, apiResponse) {
 
   if (quoteList.length > 0) {
     updateSpotPrices(cache, quoteList);
+    evictStaleInferHubNodes(cache, freshKeysByModel);
   }
 
   return cache;
+}
+
+// Stable node identity (H4): derived from the ASK PRICES, not the array
+// index — an unchanged node keeps its id across syncs, so circuit-breaker
+// history and per-node metrics survive market refreshes.
+function getInferHubNodeId(modelId, pIn, pOut) {
+  const slug = String(modelId).replace(/[^a-zA-Z0-9]+/g, "-");
+  return `inferhub-node-${slug}-in${Number(pIn).toFixed(6)}-out${Number(pOut).toFixed(6)}`;
+}
+
+// Ghost-node eviction (H4): a model's fresh ask set is the whole truth about
+// the market — any inferhub-node quote left over from an earlier payload is
+// a ghost that can win routing or fake capacity. Seeded default providers
+// (inferhub-alpha/beta/gamma) are not inferhub-nodes and are untouched.
+function evictStaleInferHubNodes(cache, freshKeysByModel) {
+  for (const [modelId, freshKeys] of freshKeysByModel) {
+    const providerSet = cache.modelToProviders[modelId];
+    if (!providerSet) continue;
+    for (const provId of Array.from(providerSet)) {
+      if (!provId.startsWith("inferhub-node-")) continue;
+      const key = getQuoteKey(provId, modelId);
+      if (!freshKeys.has(key)) {
+        delete cache.quotes[key];
+        providerSet.delete(provId);
+      }
+    }
+  }
 }
 
 export function getSpotQuote(cache, providerId, modelId) {

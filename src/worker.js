@@ -12,7 +12,6 @@ import { healToolCalls } from "./router/healer.js";
 import { createExemplarStore, recordToolOutcome, enrichPromptWithToolExemplars } from "./router/exemplars.js";
 import { rankCandidates, DEFAULT_WEIGHTS, ROUTING_POLICIES } from "./router/pareto.js";
 import { executeWithFallback } from "./router/client.js";
-import { renderDashboardHtml } from "./ui/dashboard.js";
 import { collectAnalytics, renderAnalyticsPage } from "./ui/analytics.js";
 
 let globalPriceCache = null;
@@ -63,7 +62,7 @@ function parseWeightsAndBudget(request, requestBody, env, url) {
       weights = { ...weights, ...JSON.parse(headerWeights) };
     } catch {}
   } else {
-    const policyName = env?.ROUTING_POLICY || "sol-budget-cascade";
+    const policyName = env?.ROUTING_POLICY || "budget-cascade";
     const policy = ROUTING_POLICIES[policyName] || DEFAULT_WEIGHTS;
     weights = {
       price: env?.PRICE_WEIGHT ? parseFloat(env.PRICE_WEIGHT) : policy.price,
@@ -199,10 +198,9 @@ export default {
     }
 
     if (path === "/dashboard") {
-      return new Response(renderDashboardHtml(), {
-        status: 200,
-        headers: { "Content-Type": "text/html; charset=utf-8", ...corsHeaders() }
-      });
+      // Retired 2026-09-05: the ops dashboard drifted every time the surface
+      // contracted and the analytics homepage does its job. Old links redirect.
+      return Response.redirect(new URL("/", url).toString(), 302);
     }
 
     if (path === "/v1/health") {
