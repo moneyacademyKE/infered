@@ -109,3 +109,49 @@
       (is (= 200 (:legacyStatus res)))
       (is (true? (:legacyIsDashboard res)) "/dashboard should preserve the legacy dashboard")
       (is (true? (:legacyNotAnalytics res)) "legacy dashboard must not leak analytics content"))))
+
+(deftest test-streaming-latency-recorded
+  (testing "streamed requests must record a real latency_ms, not null"
+    (let [res (run-node-eval
+               "import worker from './src/worker.js';
+
+                const inserts = [];
+                const env = {
+                  INFERHUB_BASE_URL: 'https://api.inferhub.net/v1',
+                  ROUTING_DB: {
+                    prepare: () => ({
+                      bind: (...args) => ({ run: async () => { inserts.push(args); } })
+                    })
+                  }
+                };
+                const waits = [];
+                const ctx = { waitUntil: (p) => waits.push(p) };
+
+                const req = new Request('https://edge.infered.ai/v1/chat/completions', {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({
+                    model: 'infered/sol-budget',
+                    stream: true,
+                    messages: [{ role: 'user', content: 'ping' }]
+                  })
+                });
+                const res = await worker.fetch(req, env, ctx);
+                const isStream = (res.headers.get('content-type') || '').includes('event-stream');
+                const drained = await res.text();
+                await Promise.all(waits);
+
+                console.log(JSON.stringify({
+                  isStream,
+                  drainedLen: drained.length,
+                  insertCount: inserts.length,
+                  // bind order: session(0), requested(1), selected(2), provider(3),
+                  // escalation(4), attempts(5), latency(6), ...
+                  latency: inserts.length ? inserts[0][6] : null,
+                  okFlag: inserts.length ? inserts[0][9] : null
+                }));")]
+      (is (:isStream res) "stream:true should get an event-stream response")
+      (is (> (:drainedLen res) 0) "stream body should carry content")
+      (is (= 1 (:insertCount res)) "exactly one decision row after the stream drains")
+      (is (some? (:latency res)) "latency_ms must be recorded for streamed requests")
+      (is (= 1 (:okFlag res)) "streamed request recorded as success"))))

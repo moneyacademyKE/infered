@@ -410,17 +410,30 @@ export default {
         // sessionId is stored so model pinning can be verified against real
         // traffic, and the ACTUAL serving candidate is recorded — not the
         // ranked favorite.
-        ctx.waitUntil(recordRoutingAnalytics(env, {
+        const recordDecision = (metrics) => ctx.waitUntil(recordRoutingAnalytics(env, {
           ok: true,
           model: served.modelId,
           requestedModel,
           provider: served.providerId,
           escalationLevel: served.escalationLevel ?? 0,
           attempts: result.attempts || 1,
-          latencyMs: result.latencyMs || null,
+          latencyMs: metrics.latencyMs || null,
           budgetCap: maxFallbackPrice,
           sessionId
         }));
+
+        // Streaming results carry getMetrics() — total duration is only
+        // known once the body drains, so record on flush instead of inline
+        // (inline wrote null for every streamed request).
+        let responseStream = null;
+        if (result.getMetrics && result.stream) {
+          const getMetrics = result.getMetrics;
+          responseStream = result.stream.pipeThrough(new TransformStream({
+            flush() { recordDecision(getMetrics()); }
+          }));
+        } else {
+          recordDecision(result);
+        }
 
         const telemetryHeaders = {
           "x-infered-cache": "MISS",
@@ -435,8 +448,8 @@ export default {
           "x-infered-attempts": String(result.attempts || 1)
         };
 
-        if (requestBody.stream && result.stream) {
-          return new Response(result.stream, {
+        if (requestBody.stream && responseStream) {
+          return new Response(responseStream, {
             status: 200,
             headers: {
               "Content-Type": "text/event-stream",
