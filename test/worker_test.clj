@@ -94,12 +94,18 @@
                 console.log(JSON.stringify({
                   homeStatus: homeRes.status,
                   homeIsAnalytics: homeHtml.includes('infered routing analytics'),
+                  homeHasPrices: homeHtml.includes('live spot'),
+                  homeHasRatecardRow: homeHtml.includes('gpt-5.6-sol'),
+                  homeHasDollar: homeHtml.includes('$'),
                   legacyStatus: legacyRes.status,
                   legacyIsDashboard: legacyHtml.includes('Virtual LLM Router for InferHub'),
                   legacyNotAnalytics: !legacyHtml.includes('infered routing analytics')
                 }));")]
       (is (= 200 (:homeStatus res)))
       (is (true? (:homeIsAnalytics res)) "/ should serve the routing analytics page")
+      (is (true? (:homeHasPrices res)) "/ should render the Prices (list → live spot) section")
+      (is (true? (:homeHasRatecardRow res)) "prices section should list ratecard models")
+      (is (true? (:homeHasDollar res)) "prices rows should carry $ figures")
       (is (= 200 (:legacyStatus res)))
       (is (true? (:legacyIsDashboard res)) "/dashboard should preserve the legacy dashboard")
       (is (true? (:legacyNotAnalytics res)) "legacy dashboard must not leak analytics content"))))

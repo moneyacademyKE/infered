@@ -5,7 +5,7 @@
  */
 
 import { VIRTUAL_ALIASES, MODEL_TIERS } from "./router/catalog.js";
-import { createPriceCache, updateSpotPrices, calculateSavingsPct, ingestInferHubModelsResponse } from "./router/pricing.js";
+import { createPriceCache, updateSpotPrices, calculateSavingsPct, ingestInferHubModelsResponse, buildRatecard, getQuotesForModel } from "./router/pricing.js";
 import { createMetricsStore, getProviderStats, getUsageSummary } from "./router/metrics.js";
 import { createCacheStore, computeRequestKey, getCachedResponse, putCachedResponse, getSessionAffinity, setSessionAffinity } from "./router/cache.js";
 import { healToolCalls } from "./router/healer.js";
@@ -195,7 +195,11 @@ export default {
       const data = env?.ROUTING_DB
         ? await collectAnalytics(env.ROUTING_DB)
         : { topModels: [], switching: {}, flappingSessions: 0, totalSessions: 0, last24h: 0 };
-      return new Response(renderAnalyticsPage(data), {
+      const ratecard = buildRatecard().map(r => {
+        const cheapest = getQuotesForModel(priceCache, r.modelId)[0];
+        return { ...r, spot: cheapest && cheapest.priceSource === "spot" ? cheapest : null };
+      });
+      return new Response(renderAnalyticsPage(data, ratecard), {
         status: 200,
         headers: { "Content-Type": "text/html; charset=utf-8", ...corsHeaders() }
       });

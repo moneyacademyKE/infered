@@ -180,3 +180,21 @@ export function calculateSavingsPct(modelId, spotQuote) {
   const savings = ((officialBlended - spotBlended) / officialBlended) * 100;
   return Number(Math.max(0, savings).toFixed(1));
 }
+
+/**
+ * Static rate card for display: official list prices per model, with the
+ * calibration flag from the spot-multiplier table. Display layers join
+ * recorded usage on top — this function only ever reports known numbers.
+ */
+export function buildRatecard() {
+  return Object.entries(OFFICIAL_PRICES).map(([modelId, p]) => {
+    const mult = MODEL_SPOT_MULTIPLIERS[modelId];
+    return {
+      modelId,
+      prompt: p.prompt,
+      completion: p.completion,
+      blended: calculateBlendedPrice(p.prompt, p.completion),
+      calibrated: Boolean(mult)
+    };
+  });
+}

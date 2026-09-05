@@ -80,11 +80,23 @@ function check(cond) {
   return cond ? '<span class="ok">☑</span>' : '<span class="bad">☒</span>';
 }
 
-export function renderAnalyticsPage(d) {
+export function renderAnalyticsPage(d, ratecard = null) {
   const s = d.switching;
   const total = s.total || 0;
   const directPct = total ? Math.round(100 * (s.directHits || 0) / total) : 0;
   const stable = d.flappingSessions === 0;
+
+  const priceRows = Array.isArray(ratecard) && ratecard.length
+    ? ratecard.map(r => {
+        const spot = r.spot;
+        const live = Boolean(spot);
+        const verdict = live && (spot.savingsPct ?? 0) >= 90;
+        return `<div class="item">${check(verdict)} <strong>${r.modelId}</strong>
+         <span class="num">$${r.blended}</span>/M list · ${live
+          ? `<span class="num">$${spot.blendedPrice}</span> spot · ${spot.savingsPct}% off`
+          : `<span class="muted">no live asks</span>`}${r.calibrated ? "" : ` · <span class="muted">uncalibrated</span>`}</div>`;
+      }).join("")
+    : `<div class="item muted">ratecard unavailable</div>`;
 
   const modelRows = d.topModels.length
     ? d.topModels.map(m =>
@@ -116,5 +128,8 @@ ${d.chains.length
         `<div class="item">${check((c.okPct ?? 0) >= 95)} <strong>${c.chain}</strong>
          <span class="num">${c.reqs}</span> reqs · ${c.okPct ?? 0}% ok · ${c.directHits || 0} direct · ${c.avgAttempts ?? "–"} avg attempts</div>`).join("")
     : `<div class="item muted">no chain rows yet (pre-attribution decisions have no requested_model)</div>`}
+
+<h2>Prices (list → live spot)</h2>
+${priceRows}
 </body></html>`;
 }

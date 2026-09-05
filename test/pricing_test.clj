@@ -77,3 +77,30 @@
       (is (= 0.06 (:bestCompletionPrice res)))
       (is (= 0.0475 (:bestBlendedPrice res)))
       (is (> (:savingsPct res) 95)))))
+
+(deftest test-build-ratecard
+  (testing "Ratecard lists every official model with blended list price and calibration flag"
+    (let [res (run-node-eval
+               "import { buildRatecard, calculateBlendedPrice } from './src/router/pricing.js';
+                import { OFFICIAL_PRICES } from './src/router/catalog.js';
+
+                const rc = buildRatecard();
+                const sol = rc.find(r => r.modelId === 'cx/gpt-5.6-sol');
+                const mini = rc.find(r => r.modelId === 'gpt-4o-mini');
+                console.log(JSON.stringify({
+                  count: rc.length,
+                  officialCount: Object.keys(OFFICIAL_PRICES).length,
+                  solPresent: Boolean(sol),
+                  solCalibrated: sol ? sol.calibrated === true : null,
+                  solBlendedConsistent: sol ? sol.blended === calculateBlendedPrice(sol.prompt, sol.completion) : null,
+                  miniPresent: Boolean(mini),
+                  miniUncalibrated: mini ? mini.calibrated === false : null,
+                  allWellFormed: rc.every(r => typeof r.blended === 'number' && r.blended >= 0 && typeof r.calibrated === 'boolean')
+                }));")]
+      (is (= (:count res) (:officialCount res)) "ratecard must cover every official model")
+      (is (true? (:solPresent res)))
+      (is (true? (:solCalibrated res)) "sol has a calibrated multiplier")
+      (is (true? (:solBlendedConsistent res)))
+      (is (true? (:miniPresent res)))
+      (is (true? (:miniUncalibrated res)) "models without multipliers are flagged uncalibrated")
+      (is (true? (:allWellFormed res))))))
