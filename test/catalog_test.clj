@@ -41,7 +41,7 @@
                   glmFlashPrice: getOfficialPrice('zai/glm-5.3-flash'),
                   kimiPrice: getOfficialPrice('ali/kimi-k3'),
                   terraPrice: getOfficialPrice('cx/gpt-5.6-terra'),
-                  hasPrices: Object.keys(OFFICIAL_PRICES).length >= 10
+                  hasPrices: Object.keys(OFFICIAL_PRICES).length >= 4
                 }));")]
       (is (:hasPrices res))
       ;; sol removed from catalog: lookup falls to the generic $1/$2 baseline
@@ -58,7 +58,7 @@
                   glmBudgetModels: resolveVirtualModel('infered/glm-budget'),
                   isListed: Boolean(VIRTUAL_ALIASES['infered/glm-budget']),
                   cascadeLookup: Boolean(CASCADE_CHAINS['infered/glm-budget']),
-                  solBudgetStillListed: Boolean(VIRTUAL_ALIASES['infered/sol-budget'])
+                  solBudgetStillReroutes: resolveVirtualModel('infered/sol-budget')
                 }));")]
       (is (= ["zai/glm-5.3-flash", "zai/glm-5.3", "ali/kimi-k3", "cx/gpt-5.6-terra"]
              (:glmBudgetModels res)))
@@ -66,7 +66,11 @@
           "glm-budget must never include sol")
       (is (:isListed res) "must appear in VIRTUAL_ALIASES (drives /v1/models)")
       (is (:cascadeLookup res) "must be a registered cascade chain")
-      (is (:solBudgetStillListed res) "refactor must not drop sol-budget"))))
+      ;; slimmed 2026-09-05: sol names left the listing but old callers still
+      ;; reroute to the glm-budget chain instead of erroring
+      (is (= ["zai/glm-5.3-flash", "zai/glm-5.3", "ali/kimi-k3", "cx/gpt-5.6-terra"]
+             (:solBudgetStillReroutes res))
+          "legacy sol-budget callers reroute to the glm-budget chain"))))
 
 (deftest test-astra-budget-chain
   (testing "astra-budget resolves to the astra-headed chain; gm5.3 typo must never appear"
@@ -93,6 +97,7 @@
                 console.log(JSON.stringify({
                   gm53Typo: resolveVirtualModel('zai/gm5.3'),
                   rawSol: resolveVirtualModel('cx/gpt-5.6-sol'),
+                  removedPinned: resolveVirtualModel('infered/claude-3.5-sonnet'),
                   chainMemberDirect: resolveVirtualModel('zai/glm-5.3-flash')
                 }));")]
       ;; bind-order note: the default chain is glm-budget's four-model cascade
@@ -101,5 +106,7 @@
           "the famous gm5.3 typo must land on the budget chain")
       (is (not-any? #(= "cx/gpt-5.6-sol" %) (:rawSol res))
           "raw sol resolves to a sol-free chain")
+      (is (not-any? #(= "claude-3.5-sonnet" %) (:removedPinned res))
+          "removed pinned virtuals reroute to the budget chain")
       (is (= ["zai/glm-5.3-flash"] (:chainMemberDirect res))
           "chain members stay directly addressable (they are the chains)"))))

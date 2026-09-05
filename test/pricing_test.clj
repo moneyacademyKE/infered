@@ -80,9 +80,8 @@
                 import { OFFICIAL_PRICES } from './src/router/catalog.js';
 
                 const rc = buildRatecard();
-                const sol = rc.find(r => r.modelId === 'cx/gpt-5.6-sol');
                 const terra = rc.find(r => r.modelId === 'cx/gpt-5.6-terra');
-                const mini = rc.find(r => r.modelId === 'gpt-4o-mini');
+                const kimi = rc.find(r => r.modelId === 'ali/kimi-k3');
                 console.log(JSON.stringify({
                   count: rc.length,
                   officialCount: Object.keys(OFFICIAL_PRICES).length,
@@ -90,8 +89,8 @@
                   terraPresent: Boolean(terra),
                   terraCalibrated: terra ? terra.calibrated === true : null,
                   terraBlendedConsistent: terra ? terra.blended === calculateBlendedPrice(terra.prompt, terra.completion) : null,
-                  miniPresent: Boolean(mini),
-                  miniUncalibrated: mini ? mini.calibrated === false : null,
+                  kimiPresent: Boolean(kimi),
+                  allCalibrated: rc.every(r => r.calibrated === true),
                   allWellFormed: rc.every(r => typeof r.blended === 'number' && r.blended >= 0 && typeof r.calibrated === 'boolean')
                 }));")]
       (is (= (:count res) (:officialCount res)) "ratecard must cover every official model")
@@ -99,6 +98,6 @@
       (is (true? (:terraPresent res)))
       (is (true? (:terraCalibrated res)) "terra has a calibrated multiplier")
       (is (true? (:terraBlendedConsistent res)))
-      (is (true? (:miniPresent res)))
-      (is (true? (:miniUncalibrated res)) "models without multipliers are flagged uncalibrated")
+      (is (true? (:kimiPresent res)))
+      (is (true? (:allCalibrated res)) "slimmed catalog: every remaining model is calibrated")
       (is (true? (:allWellFormed res))))))

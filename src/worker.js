@@ -4,7 +4,7 @@
  * Multi-Tier Edge Caching, Elastic Budget Escalation & Tool Call Autohealing
  */
 
-import { VIRTUAL_ALIASES, MODEL_TIERS } from "./router/catalog.js";
+import { VIRTUAL_ALIASES } from "./router/catalog.js";
 import { createPriceCache, updateSpotPrices, calculateSavingsPct, ingestInferHubModelsResponse, buildRatecard, getQuotesForModel } from "./router/pricing.js";
 import { createMetricsStore, getProviderStats, getUsageSummary } from "./router/metrics.js";
 import { createCacheStore, computeRequestKey, getCachedResponse, putCachedResponse, getSessionAffinity, setSessionAffinity } from "./router/cache.js";
@@ -219,6 +219,8 @@ export default {
     }
 
     if (path === "/v1/models" && request.method === "GET") {
+      // Exactly two products: the budget chains. Every other name a client
+      // sends still routes (unknown → default chain) — it just isn't listed.
       const virtualModels = Object.keys(VIRTUAL_ALIASES).map(alias => ({
         id: alias,
         object: "model",
@@ -229,19 +231,9 @@ export default {
         parent: null
       }));
 
-      const concreteModels = Object.keys(MODEL_TIERS).map(modelId => ({
-        id: modelId,
-        object: "model",
-        created: 1700000000,
-        owned_by: MODEL_TIERS[modelId].family,
-        permission: [],
-        root: modelId,
-        parent: null
-      }));
-
       return jsonResponse({
         object: "list",
-        data: [...virtualModels, ...concreteModels]
+        data: virtualModels
       });
     }
 

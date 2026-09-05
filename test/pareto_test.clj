@@ -20,26 +20,26 @@
                 const metricsStore = createMetricsStore();
 
                 updateSpotPrices(priceCache, [
-                  { providerId: 'node-cheap', modelId: 'claude-3.5-sonnet', prompt: 0.90, completion: 4.50 },
-                  { providerId: 'node-fast', modelId: 'claude-3.5-sonnet', prompt: 2.40, completion: 12.00 },
-                  { providerId: 'node-broken', modelId: 'claude-3.5-sonnet', prompt: 0.50, completion: 2.00 }
+                  { providerId: 'node-cheap', modelId: 'zai/glm-5.3-flash', prompt: 0.02, completion: 0.04 },
+                  { providerId: 'node-fast', modelId: 'zai/glm-5.3-flash', prompt: 0.04, completion: 0.08 },
+                  { providerId: 'node-broken', modelId: 'zai/glm-5.3-flash', prompt: 0.01, completion: 0.03 }
                 ]);
 
-                recordSample(metricsStore, 'node-cheap', 'claude-3.5-sonnet', { latencyMs: 800, ttftMs: 400, success: true });
-                recordSample(metricsStore, 'node-fast', 'claude-3.5-sonnet', { latencyMs: 120, ttftMs: 50, success: true });
+                recordSample(metricsStore, 'node-cheap', 'zai/glm-5.3-flash', { latencyMs: 800, ttftMs: 400, success: true });
+                recordSample(metricsStore, 'node-fast', 'zai/glm-5.3-flash', { latencyMs: 120, ttftMs: 50, success: true });
                 for (let i = 0; i < 5; i++) {
-                  recordSample(metricsStore, 'node-broken', 'claude-3.5-sonnet', { latencyMs: 5000, ttftMs: 5000, success: false });
+                  recordSample(metricsStore, 'node-broken', 'zai/glm-5.3-flash', { latencyMs: 5000, ttftMs: 5000, success: false });
                 }
 
                 const cheapRanked = rankCandidates({
-                  model: 'infered/claude-3.5-sonnet',
+                  model: 'zai/glm-5.3-flash',
                   priceCache,
                   metricsStore,
                   weights: { price: 0.8, speed: 0.1, quality: 0.1 }
                 });
 
                 const fastRanked = rankCandidates({
-                  model: 'infered/claude-3.5-sonnet',
+                  model: 'zai/glm-5.3-flash',
                   priceCache,
                   metricsStore,
                   weights: { price: 0.1, speed: 0.8, quality: 0.1 }
@@ -222,28 +222,28 @@
                 updateSpotPrices(cache1, [
                   { providerId: 'p1', modelId: 'zai/glm-5.3-flash', prompt: 0.05, completion: 0.08 }
                 ]);
-                const res1 = rankCandidates({ model: 'infered/sol-budget', priceCache: cache1, metricsStore });
+                const res1 = rankCandidates({ model: 'infered/glm-budget', priceCache: cache1, metricsStore });
 
                 // Case 2: Output prices surge to $0.15 (0 models <= $0.10, but available <= $0.20)
                 const cache2 = createPriceCache([]);
                 updateSpotPrices(cache2, [
                   { providerId: 'p2', modelId: 'zai/glm-5.3-flash', prompt: 0.10, completion: 0.15 }
                 ]);
-                const res2 = rankCandidates({ model: 'infered/sol-budget', priceCache: cache2, metricsStore });
+                const res2 = rankCandidates({ model: 'infered/glm-budget', priceCache: cache2, metricsStore });
 
                 // Case 3: Output prices surge to $0.25 (0 models <= $0.20, but available <= $0.30)
                 const cache3 = createPriceCache([]);
                 updateSpotPrices(cache3, [
                   { providerId: 'p3', modelId: 'zai/glm-5.3-flash', prompt: 0.15, completion: 0.25 }
                 ]);
-                const res3 = rankCandidates({ model: 'infered/sol-budget', priceCache: cache3, metricsStore });
+                const res3 = rankCandidates({ model: 'infered/glm-budget', priceCache: cache3, metricsStore });
 
                 // Case 4: Output prices surge to $0.45 (0 models <= $0.30 -> routes to cheapest healthy for zero downtime)
                 const cache4 = createPriceCache([]);
                 updateSpotPrices(cache4, [
                   { providerId: 'p4', modelId: 'zai/glm-5.3-flash', prompt: 0.20, completion: 0.45 }
                 ]);
-                const res4 = rankCandidates({ model: 'infered/sol-budget', priceCache: cache4, metricsStore });
+                const res4 = rankCandidates({ model: 'infered/glm-budget', priceCache: cache4, metricsStore });
 
                 console.log(JSON.stringify({
                   tier1: res1[0]?.budgetTier,
@@ -282,7 +282,7 @@
                 ]);
 
                 const glmRanked = rankCandidates({ model: 'infered/glm-budget', priceCache, metricsStore });
-                const solRanked = rankCandidates({ model: 'infered/sol-budget', priceCache, metricsStore });
+                const solRanked = rankCandidates({ model: 'infered/sol-budget', priceCache, metricsStore, maxFallbackPrice: 0.10 });
 
                 console.log(JSON.stringify({
                   glmWinner: glmRanked[0] && glmRanked[0].modelId,
