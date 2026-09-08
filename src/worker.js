@@ -209,6 +209,7 @@ export default {
         edge: "cloudflare-workers",
         timestamp: Date.now(),
         cachedQuotes: Object.keys(priceCache.quotes).length,
+        marketModels: Object.keys(priceCache.modelToProviders).sort(),
         chainAsks: [...new Set([...GLM_BUDGET_FALLBACK_CHAIN, ...ASTRA_BUDGET_FALLBACK_CHAIN])]
           .reduce((acc, m) => {
             acc[m] = getQuotesForModel(priceCache, m).filter(q => q.priceSource === "spot").length;
