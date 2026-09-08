@@ -61,7 +61,10 @@
                   modelsCount: modelsJson.data.length,
                   hasGlmBudget: modelsJson.data.some(m => m.id === 'infered/glm-budget'),
                   hasAstraBudget: modelsJson.data.some(m => m.id === 'infered/astra-budget'),
-                  onlyTwoChains: modelsJson.data.every(m => ['infered/glm-budget', 'infered/astra-budget'].includes(m.id)),
+                  hasAstraTerra: modelsJson.data.some(m => m.id === 'infered/astra-terra'),
+                  hasTerraKimi: modelsJson.data.some(m => m.id === 'infered/terra-kimi'),
+                  hasKimiGlm: modelsJson.data.some(m => m.id === 'infered/kimi-glm'),
+                  onlyFiveChains: modelsJson.data.every(m => ['infered/glm-budget', 'infered/astra-budget', 'infered/astra-terra', 'infered/terra-kimi', 'infered/kimi-glm'].includes(m.id)),
                   metricsQuotesCount: metricsJson.quotes.length,
                   chatSuccess: chatRes.status === 200,
                   selectedModel: selectedModel,
@@ -69,10 +72,13 @@
                   chatContent: chatJson.choices[0].message.content.length > 0
                 }));")]
       (is (= "healthy" (:healthStatus res)))
-      (is (= 2 (:modelsCount res)) "exactly the two budget chains are listed")
+      (is (= 5 (:modelsCount res)) "exactly the five chain products are listed")
       (is (:hasGlmBudget res))
       (is (:hasAstraBudget res))
-      (is (:onlyTwoChains res) "no policy aliases, no raw models in the listing")
+      (is (:hasAstraTerra res))
+      (is (:hasTerraKimi res))
+      (is (:hasKimiGlm res))
+      (is (:onlyFiveChains res) "no policy aliases, no raw models in the listing")
       (is (> (:metricsQuotesCount res) 0))
       (is (:chatSuccess res))
       (is (:savingsPct res))

@@ -113,3 +113,21 @@
           "removed pinned virtuals reroute to the budget chain")
       (is (= ["zai/glm-5.3-flash"] (:chainMemberDirect res))
           "chain members stay directly addressable (they are the chains)"))))
+
+(deftest test-three-new-chains
+  (testing "astra-terra, terra-kimi, kimi-glm resolve to their exact ordered chains"
+    (let [res (run-node-eval
+               "import { resolveVirtualModel, CASCADE_CHAINS, VIRTUAL_ALIASES } from './src/router/catalog.js';
+                console.log(JSON.stringify({
+                  astraTerra: resolveVirtualModel('infered/astra-terra'),
+                  terraKimi: resolveVirtualModel('infered/terra-kimi'),
+                  kimiGlm: resolveVirtualModel('infered/kimi-glm'),
+                  registered: ['infered/astra-terra','infered/terra-kimi','infered/kimi-glm'].every(k => Boolean(CASCADE_CHAINS[k] && VIRTUAL_ALIASES[k]))
+                }));")]
+      (is (= ["cx/gpt-6-astra" "cx/gpt-5.6-terra" "ali/kimi-k3" "zai/glm-5.3-flash"]
+             (:astraTerra res)))
+      (is (= ["cx/gpt-5.6-terra" "ali/kimi-k3" "zai/glm-5.3-flash"]
+             (:terraKimi res)))
+      (is (= ["ali/kimi-k3" "zai/glm-5.3-flash" "ali/qwen3.8-max"]
+             (:kimiGlm res)) "qwen3.8-max is the verified market id for the kimi-glm tail")
+      (is (:registered res) "all three registered in CASCADE_CHAINS and VIRTUAL_ALIASES"))))

@@ -16,6 +16,7 @@ export const MODEL_TIERS = {
 
 // Official provider list prices in USD per 1M tokens [Prompt, Completion]
 export const OFFICIAL_PRICES = {
+  "cx/gpt-6-astra": { prompt: 10, completion: 50 },
   "cx/gpt-5.6-terra": { prompt: 0.30, completion: 0.90 },
   "zai/glm-5.3": { prompt: 0.20, completion: 0.40 },
   "zai/glm-5.3-flash": { prompt: 0.06, completion: 0.10 },
@@ -46,13 +47,37 @@ export const ASTRA_BUDGET_FALLBACK_CHAIN = [
 // Owner directive 2026-09-06: the astra head must never be price-disqualified.
 export const CEILING_EXEMPT_MODELS = ["cx/gpt-6-astra"];
 
+// Three ordered chains (owner directive 2026-09-08): astra-terra, terra-kimi,
+// kimi-glm. Same budget-cascade mechanics as the -budget products.
+export const ASTRA_TERRA_CHAIN = [
+  "cx/gpt-6-astra",
+  "cx/gpt-5.6-terra",
+  "ali/kimi-k3",
+  "zai/glm-5.3-flash"
+];
+
+export const TERRA_KIMI_CHAIN = [
+  "cx/gpt-5.6-terra",
+  "ali/kimi-k3",
+  "zai/glm-5.3-flash"
+];
+
+export const KIMI_GLM_CHAIN = [
+  "ali/kimi-k3",
+  "zai/glm-5.3-flash",
+  "ali/qwen3.8-max"
+];
+
 // Virtual models that route as ordered budget cascades. Single source of truth —
 // the router detects cascade requests by lookup here, not by string comparison.
-// Exactly two products (2026-09-05): every other name a client sends reroutes
+// Five products (2026-09-08): every other name a client sends reroutes
 // to the default budget chain.
 export const CASCADE_CHAINS = {
   "infered/glm-budget": GLM_BUDGET_FALLBACK_CHAIN,
-  "infered/astra-budget": ASTRA_BUDGET_FALLBACK_CHAIN
+  "infered/astra-budget": ASTRA_BUDGET_FALLBACK_CHAIN,
+  "infered/astra-terra": ASTRA_TERRA_CHAIN,
+  "infered/terra-kimi": TERRA_KIMI_CHAIN,
+  "infered/kimi-glm": KIMI_GLM_CHAIN
 };
 
 // Default requested model — also where UNRECOGNIZED names land (typos like

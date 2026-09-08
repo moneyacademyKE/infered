@@ -16,6 +16,7 @@ export function calculateBlendedPrice(promptPrice, completionPrice) {
  * where output tokens trade <= $0.10 / 1M tokens.
  */
 const MODEL_SPOT_MULTIPLIERS = {
+  "cx/gpt-6-astra": [0.0050, 0.0050, 0.0050],      // $50.00 * 0.005 = $0.2500 (99.5% discount, per market min ask)
   "zai/glm-5.3-flash": [0.0800, 0.0900, 0.1000],   // $0.10 * 0.08 = $0.0080 (92.0% discount)
   "zai/glm-5.3": [0.1000, 0.1200, 0.1500],         // $0.50 * 0.10 = $0.0500 (90.0% discount)
   "cx/gpt-5.6-terra": [0.0100, 0.0120, 0.0150],    // $1.00 * 0.01 = $0.0100 (99.0% discount)
