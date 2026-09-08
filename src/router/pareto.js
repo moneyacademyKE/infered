@@ -4,7 +4,7 @@
  * and progressive budget ceiling escalation ($0.10 -> $0.20 -> $0.30 -> zero-downtime fallback).
  */
 
-import { resolveVirtualModel, getModelMetadata, CASCADE_CHAINS } from "./catalog.js";
+import { resolveVirtualModel, getModelMetadata, CASCADE_CHAINS, CEILING_EXEMPT_MODELS } from "./catalog.js";
 import { getQuotesForModel, calculateSavingsPct } from "./pricing.js";
 import { getProviderStats, isCircuitOpen } from "./metrics.js";
 
@@ -56,14 +56,21 @@ function evaluateCascadeTier({
       // Strict output token budget ceiling. Two hard rules:
       // 1. Only trade on verified spot asks — official list prices cannot prove
       //    budget compliance, so an order book gap skips the model (with a metric)
-      //    instead of accidentally disqualifying it at $30/M.
-      // 2. NaN/malformed asks are unpriceable, therefore never budget-compliant.
+      //    instead of accidentally disqualifying it at $30/M. This stays for
+      //    CEILING_EXEMPT_MODELS too: no ask = no route, never a $2 placeholder.
+      // 2. NaN/malformed asks are unpriceable broken data, never eligible.
+      // CEILING_EXEMPT_MODELS lift ONLY the ceiling-level comparison: any ask
+      // price is acceptable (owner directive), but an ask must still exist.
+      const priceExempt = CEILING_EXEMPT_MODELS.includes(modelId);
       if (ceiling !== Infinity) {
         if (quote.priceSource === "official") {
           metricsStore.usage.officialFallbackSkips = (metricsStore.usage.officialFallbackSkips || 0) + 1;
           continue;
         }
-        if (!Number.isFinite(outputTokenPrice) || outputTokenPrice > ceiling) {
+        if (!Number.isFinite(outputTokenPrice)) {
+          continue;
+        }
+        if (!priceExempt && outputTokenPrice > ceiling) {
           continue;
         }
       }

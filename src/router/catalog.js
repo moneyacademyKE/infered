@@ -32,13 +32,19 @@ export const GLM_BUDGET_FALLBACK_CHAIN = [
 ];
 
 // Astra-headed budget cascade: the head activates automatically once
-// cx/gpt-5.6-astra lists live spot asks on InferHub (eligibility skips
-// unquoted models, so flash/kimi carry traffic until then).
+// cx/gpt-6-astra lists live spot asks on InferHub (eligibility skips
+// unquoted models, so flash/kimi carry traffic until then). The head is
+// price-exempt (see CEILING_EXEMPT_MODELS): its ask can never disqualify it.
 export const ASTRA_BUDGET_FALLBACK_CHAIN = [
-  "cx/gpt-5.6-astra",
+  "cx/gpt-6-astra",
   "zai/glm-5.3-flash",
   "ali/kimi-k3"
 ];
+
+// Models exempt from the output-price CEILING: any ask price is acceptable.
+// Verified-spot-ask still required (no ask = no route, never the $2 placeholder).
+// Owner directive 2026-09-06: the astra head must never be price-disqualified.
+export const CEILING_EXEMPT_MODELS = ["cx/gpt-6-astra"];
 
 // Virtual models that route as ordered budget cascades. Single source of truth —
 // the router detects cascade requests by lookup here, not by string comparison.
