@@ -82,7 +82,7 @@
                   cascadeLookup: Boolean(CASCADE_CHAINS['infered/astra-budget']),
                   glmBudgetStillListed: Boolean(VIRTUAL_ALIASES['infered/glm-budget'])
                 }));")]
-      (is (= ["cx/gpt-6-astra", "zai/glm-5.3-flash", "ali/kimi-k3"]
+      (is (= ["cx/gpt-5.6-astra", "zai/glm-5.3-flash", "ali/kimi-k3"]
              (:astraBudgetModels res)))
       (is (not-any? #(= "zai/gm5.3" %) (:astraBudgetModels res))
           "gm5.3 does not exist on the market; chain must use zai/glm-5.3")

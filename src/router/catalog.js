@@ -32,10 +32,10 @@ export const GLM_BUDGET_FALLBACK_CHAIN = [
 ];
 
 // Astra-headed budget cascade: the head activates automatically once
-// cx/gpt-6-astra lists live spot asks on InferHub (eligibility skips
-// unquoted models, so zai/kimi carry traffic until then).
+// cx/gpt-5.6-astra lists live spot asks on InferHub (eligibility skips
+// unquoted models, so flash/kimi carry traffic until then).
 export const ASTRA_BUDGET_FALLBACK_CHAIN = [
-  "cx/gpt-6-astra",
+  "cx/gpt-5.6-astra",
   "zai/glm-5.3-flash",
   "ali/kimi-k3"
 ];
