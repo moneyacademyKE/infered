@@ -97,6 +97,14 @@ async function syncLiveInferHubQuotes(priceCache, baseUrl, apiKey) {
     if (res.ok) {
       const data = await res.json();
       ingestInferHubModelsResponse(priceCache, data);
+      const arr = Array.isArray(data) ? data : (data?.data || []);
+      priceCache.lastSyncRaw = {
+        at: Date.now(),
+        total: arr.length,
+        withPricing: arr.filter(m => m && m.pricing).length,
+        astraEntry: arr.find(m => /astra/i.test(m?.id || "")) || null,
+        ids: arr.slice(0, 50).map(m => m?.id)
+      };
     }
   } catch {}
 }
@@ -210,6 +218,7 @@ export default {
         timestamp: Date.now(),
         cachedQuotes: Object.keys(priceCache.quotes).length,
         marketModels: Object.keys(priceCache.modelToProviders).sort(),
+        lastSyncRaw: priceCache.lastSyncRaw || null,
         chainAsks: [...new Set([...GLM_BUDGET_FALLBACK_CHAIN, ...ASTRA_BUDGET_FALLBACK_CHAIN])]
           .reduce((acc, m) => {
             acc[m] = getQuotesForModel(priceCache, m).filter(q => q.priceSource === "spot").length;
