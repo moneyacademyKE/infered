@@ -4,7 +4,7 @@
  * Multi-Tier Edge Caching, Elastic Budget Escalation & Tool Call Autohealing
  */
 
-import { VIRTUAL_ALIASES } from "./router/catalog.js";
+import { VIRTUAL_ALIASES, GLM_BUDGET_FALLBACK_CHAIN, ASTRA_BUDGET_FALLBACK_CHAIN } from "./router/catalog.js";
 import { createPriceCache, updateSpotPrices, calculateSavingsPct, ingestInferHubModelsResponse, buildRatecard, getQuotesForModel } from "./router/pricing.js";
 import { createMetricsStore, getProviderStats, getUsageSummary } from "./router/metrics.js";
 import { createCacheStore, computeRequestKey, getCachedResponse, putCachedResponse, getSessionAffinity, setSessionAffinity } from "./router/cache.js";
@@ -209,6 +209,11 @@ export default {
         edge: "cloudflare-workers",
         timestamp: Date.now(),
         cachedQuotes: Object.keys(priceCache.quotes).length,
+        chainAsks: [...new Set([...GLM_BUDGET_FALLBACK_CHAIN, ...ASTRA_BUDGET_FALLBACK_CHAIN])]
+          .reduce((acc, m) => {
+            acc[m] = getQuotesForModel(priceCache, m).filter(q => q.priceSource === "spot").length;
+            return acc;
+          }, {}),
         cachedResponses: cacheStore.responseCache.size,
         activeSessions: cacheStore.sessionAffinity.size,
         toolStats: exemplarStore.toolStats,
