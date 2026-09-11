@@ -1,13 +1,10 @@
-/**
- * Infered - Dynamic Virtual LLM Router for InferHub Marketplace
- * Cloudflare Workers Edge Entry Point with Continuous SWR Live Marketplace Ingestion,
- * Multi-Tier Edge Caching, Elastic Budget Escalation & Tool Call Autohealing
- */
+/** Infered — dynamic virtual LLM router for the InferHub spot marketplace. */
 
-import { VIRTUAL_ALIASES, GLM_BUDGET_FALLBACK_CHAIN, ASTRA_BUDGET_FALLBACK_CHAIN } from "./router/catalog.js";
+import { VIRTUAL_ALIASES, GLM_BUDGET_FALLBACK_CHAIN, ASTRA_BUDGET_FALLBACK_CHAIN, resolveStrongLink } from "./router/catalog.js";
 import { createPriceCache, updateSpotPrices, calculateSavingsPct, ingestInferHubModelsResponse, buildRatecard, getQuotesForModel } from "./router/pricing.js";
 import { createMetricsStore, getProviderStats, getUsageSummary } from "./router/metrics.js";
-import { createCacheStore, computeRequestKey, getCachedResponse, putCachedResponse, getSessionAffinity, setSessionAffinity } from "./router/cache.js";
+import { createCacheStore, computeRequestKey, getCachedResponse, putCachedResponse } from "./router/cache.js";
+import { resolveSessionId, getSessionPin, recordSessionPin } from "./router/session.js";
 import { healToolCalls } from "./router/healer.js";
 import { createExemplarStore, recordToolOutcome, enrichPromptWithToolExemplars } from "./router/exemplars.js";
 import { rankCandidates, DEFAULT_WEIGHTS, ROUTING_POLICIES } from "./router/pareto.js";
@@ -38,7 +35,7 @@ function corsHeaders() {
   return {
     "Access-Control-Allow-Origin": "*",
     "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS",
-    "Access-Control-Allow-Headers": "Content-Type, Authorization, X-Infered-Weights, X-Infered-Max-Price, X-Session-ID, X-Session-Affinity, X-Infered-Cache, X-InferHub-Provider",
+      "Access-Control-Allow-Headers": "Content-Type, Authorization, X-Infered-Weights, X-Infered-Max-Price, X-Infered-Tier, X-Session-ID, X-Session-Affinity, X-Infered-Cache, X-InferHub-Provider",
     "Access-Control-Expose-Headers": "x-infered-selected-model, x-infered-provider, x-infered-savings-pct, x-infered-latency-ms, x-infered-ttft-ms, x-infered-cache, x-infered-budget-tier, x-infered-escalation-level, x-infered-tool-healed, x-infered-attempts"
   };
 }
@@ -150,24 +147,13 @@ function createStandaloneMockFetch() {
     const prov = opts.headers["X-InferHub-Provider"] || "mock-node";
     const model = body.model || "zai/glm-5.3-flash";
     const prompt = body.messages?.[body.messages.length - 1]?.content || "Hello";
-
-    return new Response(JSON.stringify({
+    return jsonResponse({
       id: `chatcmpl-${Date.now()}`,
       object: "chat.completion",
       created: Math.floor(Date.now() / 1000),
       model,
-      choices: [{
-        index: 0,
-        message: {
-          role: "assistant",
-          content: `[Infered Edge Routing via ${prov}] Model ${model} processed prompt: "${prompt}" successfully.`
-        },
-        finish_reason: "stop"
-      }],
+      choices: [{ index: 0, finish_reason: "stop", message: { role: "assistant", content: `[Infered Edge Routing via ${prov}] Model ${model} processed prompt: "${prompt}" successfully.` } }],
       usage: { prompt_tokens: 18, completion_tokens: 22, total_tokens: 40 }
-    }), {
-      status: 200,
-      headers: { "Content-Type": "application/json" }
     });
   };
 }
@@ -294,10 +280,13 @@ export default {
         // Sol removed 2026-09-05 (owner directive) — glm-budget is the default chain.
         const requestedModel = requestBody.model || "infered/glm-budget";
         const { weights, maxFallbackPrice } = parseWeightsAndBudget(request, requestBody, env, url);
+        const startAtModel = request.headers.get("X-Infered-Tier") === "strong" ? resolveStrongLink(requestedModel) : null;
 
-        // 1. Session affinity check
-        const sessionId = request.headers.get("X-Session-ID") || request.headers.get("X-Session-Affinity");
-        const sessionAffinity = getSessionAffinity(cacheStore, sessionId);
+        // 1. Session identity: explicit header wins, else a conversation-head
+        // fingerprint — 99.91% of traffic sends no header (D1 audit 2026-09-10),
+        // and a pin that engages for 0.1% of requests is dead code.
+        const sessionId = resolveSessionId(request, requestBody);
+        const sessionAffinity = await getSessionPin(cacheStore, sessionId, env);
 
         // 2. Exact Deterministic Response Caching check
         const isDeterministic = (requestBody.temperature === 0 || request.headers.get("X-Infered-Cache") === "true") && !requestBody.stream;
@@ -337,7 +326,8 @@ export default {
           weights,
           maxFallbackPrice,
           sessionAffinityProvider: sessionAffinity?.providerId,
-          sessionAffinityModel: sessionAffinity?.modelId
+          sessionAffinityModel: sessionAffinity?.modelId,
+          startAtModel
         });
 
         if (candidates.length === 0) {
@@ -411,9 +401,7 @@ export default {
           }
         }
 
-        if (sessionId) {
-          setSessionAffinity(cacheStore, sessionId, served.providerId, served.modelId);
-        }
+        recordSessionPin(cacheStore, env, ctx, sessionId, served.providerId, served.modelId);
 
         if (isDeterministic && cacheKey && responseBody) {
           putCachedResponse(cacheStore, cacheKey, responseBody);

@@ -127,9 +127,12 @@
                 const env = {
                   INFERHUB_BASE_URL: 'https://api.inferhub.net/v1',
                   ROUTING_DB: {
-                    prepare: () => ({
-                      bind: (...args) => ({ run: async () => { inserts.push(args); } })
-                    })
+                    prepare: (sql) => ({
+                      bind: (...args) => ({
+                        run: async () => { if (sql.includes('routing_decisions')) inserts.push(args); },
+                        first: async () => null
+                      })
+                  })
                   }
                 };
                 const waits = [];
@@ -173,9 +176,12 @@
                 const env = {
                   INFERHUB_BASE_URL: 'https://api.inferhub.net/v1',
                   ROUTING_DB: {
-                    prepare: () => ({
-                      bind: (...args) => ({ run: async () => { inserts.push(args); } })
-                    })
+                    prepare: (sql) => ({
+                      bind: (...args) => ({
+                        run: async () => { if (sql.includes('routing_decisions')) inserts.push(args); },
+                        first: async () => null
+                      })
+                  })
                   }
                 };
                 const waits = [];
@@ -226,9 +232,12 @@
                 const env = {
                   INFERHUB_BASE_URL: 'https://api.inferhub.net/v1',
                   ROUTING_DB: {
-                    prepare: () => ({
-                      bind: (...args) => ({ run: async () => { inserts.push(args); } })
-                    })
+                    prepare: (sql) => ({
+                      bind: (...args) => ({
+                        run: async () => { if (sql.includes('routing_decisions')) inserts.push(args); },
+                        first: async () => null
+                      })
+                  })
                   }
                 };
                 const waits = [];
@@ -256,3 +265,91 @@
       (is (= 1 (:insertCount res)) "abandoned stream leaves exactly one decision row")
       (is (= 0 (:okFlag res)) "abandoned stream recorded as failure, not fake success")
       (is (= "client_disconnected" (:error res)) "row carries the client_disconnected error"))))
+
+(deftest test-session-fingerprint-recorded
+  (testing "headerless requests derive a stable fp- session id, recorded on decision rows; pins persist to D1"
+    (let [res (run-node-eval
+               "import worker from './src/worker.js';
+
+                const inserts = [];
+                const sqls = [];
+                const env = {
+                  INFERHUB_BASE_URL: 'https://api.inferhub.net/v1',
+                  ROUTING_DB: {
+                    prepare: (sql) => ({
+                      bind: (...args) => ({
+                        run: async () => { sqls.push(sql); if (sql.includes('routing_decisions')) inserts.push(args); },
+                        first: async () => null
+                      })
+                    })
+                  }
+                };
+                const waits = [];
+                const ctx = { waitUntil: (p) => waits.push(p) };
+
+                const mkReq = () => new Request('https://edge.infered.ai/v1/chat/completions', {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({
+                    model: 'infered/glm-budget',
+                    messages: [{ role: 'user', content: 'fingerprint me, no session header' }]
+                  })
+                });
+
+                const r1 = await worker.fetch(mkReq(), env, ctx);
+                await r1.json();
+                const r2 = await worker.fetch(mkReq(), env, ctx);
+                await r2.json();
+                await Promise.all(waits);
+
+                console.log(JSON.stringify({
+                  insertCount: inserts.length,
+                  sessionA: inserts.length ? inserts[0][0] : null,
+                  sessionB: inserts.length > 1 ? inserts[1][0] : null,
+                  pinUpsertSeen: sqls.some(s => s.includes('session_pins'))
+                }));")]
+      (is (= 2 (:insertCount res)) "both requests record decision rows")
+      (is (some? (:sessionA res)) "no header no longer means NULL session_id")
+      (is (clojure.string/starts-with? (:sessionA res) "fp-") "derived ids are visibly fingerprints")
+      (is (= (:sessionA res) (:sessionB res)) "same conversation head -> same session across requests")
+      (is (:pinUpsertSeen res) "durable pin write reached D1"))))
+
+(deftest test-tier-strong-header
+  (testing "X-Infered-Tier: strong starts the cascade at the chain's designated strong link"
+    (let [res (run-node-eval
+               "import worker from './src/worker.js';
+
+                const env = { INFERHUB_BASE_URL: 'https://api.inferhub.net/v1' };
+                const ctx = { waitUntil: () => {} };
+
+                const mkReq = (tier) => new Request('https://edge.infered.ai/v1/chat/completions', {
+                  method: 'POST',
+                  headers: tier
+                    ? { 'Content-Type': 'application/json', 'X-Infered-Tier': tier }
+                    : { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({
+                    model: 'infered/glm-budget',
+                    messages: [{ role: 'user', content: 'tier probe ' + (tier || 'default') }]
+                  })
+                });
+
+                const strongRes = await worker.fetch(mkReq('strong'), env, ctx);
+                await strongRes.json();
+                const defaultRes = await worker.fetch(mkReq(null), env, ctx);
+                await defaultRes.json();
+                const bogusRes = await worker.fetch(mkReq('ludicrous'), env, ctx);
+                await bogusRes.json();
+
+                console.log(JSON.stringify({
+                  strongSelected: strongRes.headers.get('x-infered-selected-model'),
+                  defaultSelected: defaultRes.headers.get('x-infered-selected-model'),
+                  bogusSelected: bogusRes.headers.get('x-infered-selected-model'),
+                  strongStatus: strongRes.status
+                }));")]
+      (is (= "ali/kimi-k3" (:strongSelected res))
+          "glm-budget's strong link is kimi — flash/glm are skipped")
+      (is (= "zai/glm-5.3-flash" (:defaultSelected res))
+          "no tier header keeps the budget head")
+      (is (= "zai/glm-5.3-flash" (:bogusSelected res))
+          "unknown tier values are ignored, never an error")
+      (is (= 200 (:strongStatus res))))))

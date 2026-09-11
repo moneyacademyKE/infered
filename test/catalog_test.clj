@@ -131,3 +131,24 @@
       (is (= ["ali/kimi-k3" "zai/glm-5.3-flash" "ali/qwen3.8-max"]
              (:kimiGlm res)) "qwen3.8-max is the verified market id for the kimi-glm tail")
       (is (:registered res) "all three registered in CASCADE_CHAINS and VIRTUAL_ALIASES"))))
+
+(deftest test-strong-links
+  (testing "each chain names a designated strong link for X-Infered-Tier: strong; unknown names fall to the default chain's"
+    (let [res (run-node-eval
+               "import { resolveStrongLink } from './src/router/catalog.js';
+                console.log(JSON.stringify({
+                  glmBudget: resolveStrongLink('infered/glm-budget'),
+                  astraBudget: resolveStrongLink('infered/astra-budget'),
+                  astraTerra: resolveStrongLink('infered/astra-terra'),
+                  terraKimi: resolveStrongLink('infered/terra-kimi'),
+                  kimiGlm: resolveStrongLink('infered/kimi-glm'),
+                  unknownName: resolveStrongLink('zai/gm5.3'),
+                  empty: resolveStrongLink('')
+                }));")]
+      (is (= "ali/kimi-k3" (:glmBudget res)) "highest-quality catalog model carries glm-budget's strong link")
+      (is (= "cx/gpt-6-astra" (:astraBudget res)) "the premium head IS astra-budget's strong link")
+      (is (= "cx/gpt-6-astra" (:astraTerra res)))
+      (is (= "ali/kimi-k3" (:terraKimi res)))
+      (is (= "ali/qwen3.8-max" (:kimiGlm res)) "the big-gun tail is kimi-glm's strong link")
+      (is (= "ali/kimi-k3" (:unknownName res)) "unrecognized names inherit the default chain's strong link")
+      (is (= "ali/kimi-k3" (:empty res))))))

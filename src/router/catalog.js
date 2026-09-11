@@ -86,6 +86,28 @@ export const CASCADE_CHAINS = {
 // win. Matches worker.js's no-model default.
 export const DEFAULT_MODEL = "infered/glm-budget";
 
+// Designated strong link per chain — where X-Infered-Tier: strong starts the
+// cascade. Chains are ECONOMIC orderings (head = preferred under spot prices),
+// so the strong link is an explicit capability pick, not a position guess:
+// kimi-k3 scores highest in MODEL_TIERS (0.94); qwen3.8-max is kimi-glm's
+// big-gun tail; the astra heads are already their chains' premium play (a
+// strong start there is a graceful no-op over the full chain).
+export const CHAIN_STRONG_LINKS = {
+  "infered/glm-budget": "ali/kimi-k3",
+  "infered/astra-budget": "cx/gpt-6-astra",
+  "infered/astra-terra": "cx/gpt-6-astra",
+  "infered/terra-kimi": "ali/kimi-k3",
+  "infered/kimi-glm": "ali/qwen3.8-max"
+};
+
+// Mirrors the cascade resolution rule (CASCADE_CHAINS hit, else default chain)
+// so tier:strong on a typo'd name still lands on the default chain's muscle.
+export function resolveStrongLink(model) {
+  const clean = (model || "").trim().toLowerCase();
+  const name = CASCADE_CHAINS[clean] ? clean : DEFAULT_MODEL;
+  return CHAIN_STRONG_LINKS[name] || null;
+}
+
 // Declared sibling-chain fallback: when a chain prices out entirely or every
 // candidate fails upstream, the executor may retry exactly once on this chain.
 // glm-budget is terminal (no entry — no fallback, no loop).

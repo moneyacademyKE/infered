@@ -147,9 +147,17 @@ function rankOrderedBudgetCascade({
   metricsStore,
   maxFallbackPrice = null,
   sessionAffinityProvider = null,
-  sessionAffinityModel = null
+  sessionAffinityModel = null,
+  startAtModel = null
 }) {
-  const chain = CASCADE_CHAINS[model] || resolveVirtualModel(model);
+  const resolved = CASCADE_CHAINS[model] || resolveVirtualModel(model);
+
+  // X-Infered-Tier: strong — begin the cascade at the chain's designated
+  // strong link. A start model outside the chain (or at the head) is a
+  // graceful no-op, never an error. The budget ladder still governs prices;
+  // the tier only picks where the cascade begins.
+  const startIdx = startAtModel ? resolved.indexOf(startAtModel) : -1;
+  const chain = startIdx > 0 ? resolved.slice(startIdx) : resolved;
 
   const ladder = maxFallbackPrice !== null
     ? [maxFallbackPrice, 0.20, 0.30, Infinity].filter((v, idx, arr) => arr.indexOf(v) === idx)
@@ -189,7 +197,8 @@ export function rankCandidates({
   weights = DEFAULT_WEIGHTS,
   maxFallbackPrice = null,
   sessionAffinityProvider = null,
-  sessionAffinityModel = null
+  sessionAffinityModel = null,
+  startAtModel = null
 }) {
   const isCascadeRequest = Boolean(CASCADE_CHAINS[model]) ||
                            maxFallbackPrice !== null;
@@ -201,7 +210,8 @@ export function rankCandidates({
       metricsStore,
       maxFallbackPrice,
       sessionAffinityProvider,
-      sessionAffinityModel
+      sessionAffinityModel,
+      startAtModel
     });
   }
 

@@ -344,3 +344,37 @@
       (is (:deferredIsCascade res) "must take the ordered budget-cascade path")
       (is (= "cx/gpt-6-astra" (:promotedWinner res))
           "once the market lists astra, it becomes the head even OVER the ceiling (price-exempt)"))))
+
+(deftest test-start-at-model-slices-chain
+  (testing "startAtModel drops weaker head links (tier: strong); unknown start models leave the chain intact"
+    (let [res (run-node-eval
+               "import { rankCandidates } from './src/router/pareto.js';
+                import { createPriceCache, updateSpotPrices } from './src/router/pricing.js';
+                import { createMetricsStore } from './src/router/metrics.js';
+
+                const metricsStore = createMetricsStore();
+                const cache = createPriceCache([]);
+                updateSpotPrices(cache, [
+                  { providerId: 'n-flash', modelId: 'zai/glm-5.3-flash', prompt: 0.02, completion: 0.04 },
+                  { providerId: 'n-glm', modelId: 'zai/glm-5.3', prompt: 0.05, completion: 0.07 },
+                  { providerId: 'n-kimi', modelId: 'ali/kimi-k3', prompt: 0.06, completion: 0.08 },
+                  { providerId: 'n-terra', modelId: 'cx/gpt-5.6-terra', prompt: 0.07, completion: 0.09 }
+                ]);
+
+                const full = rankCandidates({ model: 'infered/glm-budget', priceCache: cache, metricsStore });
+                const sliced = rankCandidates({ model: 'infered/glm-budget', priceCache: cache, metricsStore, startAtModel: 'ali/kimi-k3' });
+                const bogus = rankCandidates({ model: 'infered/glm-budget', priceCache: cache, metricsStore, startAtModel: 'cx/gpt-9-bogus' });
+                const headStart = rankCandidates({ model: 'infered/glm-budget', priceCache: cache, metricsStore, startAtModel: 'zai/glm-5.3-flash' });
+
+                console.log(JSON.stringify({
+                  fullChain: full.map(c => c.modelId),
+                  slicedChain: sliced.map(c => c.modelId),
+                  bogusChain: bogus.map(c => c.modelId),
+                  headChain: headStart.map(c => c.modelId)
+                }));")]
+      (is (= ["zai/glm-5.3-flash" "zai/glm-5.3" "ali/kimi-k3" "cx/gpt-5.6-terra"]
+             (:fullChain res)) "baseline: whole chain under the ceiling")
+      (is (= ["ali/kimi-k3" "cx/gpt-5.6-terra"] (:slicedChain res))
+          "starting at kimi drops flash and glm — the strong tail only")
+      (is (= (:fullChain res) (:bogusChain res)) "a start model outside the chain is ignored, never an error")
+      (is (= (:fullChain res) (:headChain res)) "starting at the head is a graceful no-op"))))
