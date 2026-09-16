@@ -96,3 +96,34 @@
       (is (:endLineIsNumber res))
       (is (:includeHiddenIsBool res))
       (is (true? (:includeHiddenValue res))))))
+
+(deftest test-preparsed-object-arguments
+  (testing "Heals tool calls even when arguments are already parsed JSON objects"
+    (let [res (run-node-eval
+               "import { healToolCalls } from './src/router/healer.js';
+                const toolSchema = [{
+                  type: 'function',
+                  function: {
+                    name: 'search',
+                    parameters: {
+                      type: 'object',
+                      properties: { query: { type: 'string' } }
+                    }
+                  }
+                }];
+                const choices = [{
+                  message: {
+                    tool_calls: [{
+                      type: 'function',
+                      function: {
+                        name: 'search',
+                        arguments: { q: 'hello world' }
+                      }
+                    }]
+                  }
+                }];
+                const healed = healToolCalls(choices, toolSchema);
+                const args = JSON.parse(healed[0].message.tool_calls[0].function.arguments);
+                console.log(JSON.stringify({ query: args.query }));")]
+      (is (= "hello world" (:query res))))))
+

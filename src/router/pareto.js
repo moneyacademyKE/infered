@@ -89,6 +89,13 @@ function evaluateCascadeTier({
         priorityScore -= failureRate * 10.0;
       }
 
+      // Straggler node mitigation: nodes with EMA latency > 3000ms receive a latency penalty,
+      // preventing persistent selection of 20-40s nodes over healthy fast nodes of the same model.
+      if (!circuitTripped && stats.emaLatency > 3000) {
+        const excessSeconds = (stats.emaLatency - 3000) / 1000;
+        priorityScore -= Math.min(25.0, Number((excessSeconds * 0.5).toFixed(3)));
+      }
+
       candidates.push({
         providerId,
         modelId,
@@ -160,7 +167,7 @@ function rankOrderedBudgetCascade({
   const chain = startIdx > 0 ? resolved.slice(startIdx) : resolved;
 
   const ladder = maxFallbackPrice !== null
-    ? [maxFallbackPrice, 0.20, 0.30, Infinity].filter((v, idx, arr) => arr.indexOf(v) === idx)
+    ? [maxFallbackPrice, ...[0.20, 0.30, Infinity].filter(p => p > maxFallbackPrice)]
     : DEFAULT_BUDGET_LADDER;
 
   for (let level = 0; level < ladder.length; level++) {

@@ -72,6 +72,10 @@ export function recordSample(store, providerId, modelId, sample, alpha = DEFAULT
     }
   } else {
     stats.failedRequests += 1;
+    if (stats.circuitState === "half-open") {
+      stats.circuitState = "open";
+      stats.circuitTrippedAt = now;
+    }
   }
 
   stats.recentSamples.push({

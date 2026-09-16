@@ -57,9 +57,11 @@ async function executeCandidateRequest({
 
   const headers = {
     "Content-Type": "application/json",
-    "Accept": requestBody.stream ? "text/event-stream" : "application/json",
-    "X-InferHub-Provider": candidate.providerId
+    "Accept": requestBody.stream ? "text/event-stream" : "application/json"
   };
+  if (candidate.providerId && candidate.providerId !== "official") {
+    headers["X-InferHub-Provider"] = candidate.providerId;
+  }
   if (apiKey) {
     headers["Authorization"] = `Bearer ${apiKey}`;
   }
@@ -91,7 +93,10 @@ async function executeCandidateRequest({
 
       // Explicit pipeTo, not pipeThrough: a mid-stream client cancel rejects
       // the source pipe — expected, so catch it; never an unhandled rejection.
-      response.body.pipeTo(telemetryStream.writable).catch(() => {});
+      // Clean up the client abort listener when the stream terminates.
+      response.body.pipeTo(telemetryStream.writable)
+        .then(() => detachClientAbort())
+        .catch(() => detachClientAbort());
 
       return {
         success: true,
@@ -286,8 +291,10 @@ export async function executeWithChainFallback({ requestedModel, rank, execute }
         result = fbResult;
         result.attempts = primaryAttempts + (fbResult.attempts || 1);
         fallbackChain = fallbackName;
+        candidates = fbCandidates;
       } else {
         result.fallbackTried = fallbackName;
+        candidates = fbCandidates;
       }
     }
   }

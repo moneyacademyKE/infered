@@ -15,3 +15,20 @@
 ## 4. Zero-NPM Edge Tooling with Babashka
 - **Pattern**: By using Babashka for development automation, test runners, and market simulation scripts, we avoid the overhead, vulnerabilities, and complex dependency graphs of `npm`.
 - **Learning**: Pure ESM JavaScript files (`src/**/*.js`) running natively on Node, Bun, and Cloudflare Workers combined with Babashka scripts provide instant feedback cycles (<50ms).
+
+## 5. Intra-Model Straggler Latency Latching in Spot Cascades
+- **Pattern**: In ordered budget cascades, multiple spot nodes often offer the same model. Sorting purely by `blendedPrice` creates a pathology where a 35-second node with a $0.001 cheaper price latches as the primary provider indefinitely because it technically never returned a 5xx error.
+- **Solution**: Penalize nodes with `emaLatency > 3000ms` in cascade priority scoring so a 1.2s node at $0.038 easily beats a 35s node at $0.035.
+
+## 6. Monotonic Budget Ladder Invariant
+- **Pattern**: When allowing callers to override the budget ceiling (e.g. `X-Infered-Max-Price: 0.25`), naive insertion into a static array `[maxPrice, 0.20, 0.30, Infinity]` inverts escalation order (`0.25 -> 0.20`), tightening constraints instead of loosening them.
+- **Solution**: Always filter and sort escalation ladders strictly ascending: `[maxPrice, ...rest.filter(p => p > maxPrice)]`.
+
+## 7. Fail-Fast Circuit State Transitions
+- **Pattern**: When transitioning a circuit breaker from `open` to `half-open`, relying on a rolling sample window failure rate (e.g. 40%) to re-trip the circuit causes consecutive failures to slip through if recent historical samples contained successes.
+- **Solution**: Michael Nygard / Martin Fowler fail-fast semantics: a *single* failure in `half-open` state must immediately trip the circuit back to `open`.
+
+## 8. Bidirectional Synonym Resolution in Edge Schemas
+- **Pattern**: LLM output arguments often use short aliases (`q`, `cmd`, `url`). Unidirectional map lookups (`COMMON_SYNONYMS[rawKey]`) fail when canonical keys are used as group headings.
+- **Solution**: Invert and traverse synonym clusters to check if any member matches an expected schema property.
+

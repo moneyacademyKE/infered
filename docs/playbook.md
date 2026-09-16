@@ -47,3 +47,15 @@ You can tune weights globally via environment variables in `wrangler.jsonc` or p
   "quality": 0.1
 }
 ```
+
+## 5. Telemetry & Decision Auditing
+To inspect live production decisions and latency profiles stored in Cloudflare D1:
+
+```bash
+# Run D1 aggregate audit script
+bb scripts/d1-audit.bb
+
+# Check recent 60 routing decisions
+bb scripts/d1-check.bb
+```
+

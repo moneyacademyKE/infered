@@ -159,3 +159,20 @@
       (is (= "ali/qwen3.8-max" (:kimiGlm res)) "the big-gun tail is kimi-glm's strong link")
       (is (= "ali/kimi-k3" (:unknownName res)) "unrecognized names inherit the default chain's strong link")
       (is (= "ali/kimi-k3" (:empty res))))))
+
+(deftest test-qwen-metadata
+  (testing "ali/qwen3.8-max is properly registered in MODEL_TIERS and OFFICIAL_PRICES"
+    (let [res (run-node-eval
+               "import { MODEL_TIERS, OFFICIAL_PRICES, getOfficialPrice, getModelMetadata } from './src/router/catalog.js';
+                console.log(JSON.stringify({
+                  hasTier: Boolean(MODEL_TIERS['ali/qwen3.8-max']),
+                  hasPrice: Boolean(OFFICIAL_PRICES['ali/qwen3.8-max']),
+                  tier: getModelMetadata('ali/qwen3.8-max'),
+                  price: getOfficialPrice('ali/qwen3.8-max')
+                }));")]
+      (is (:hasTier res))
+      (is (:hasPrice res))
+      (is (= "frontier-flagship" (get-in res [:tier :tier])))
+      (is (>= (get-in res [:tier :quality]) 0.95))
+      (is (> (get-in res [:price :prompt]) 0)))))
+

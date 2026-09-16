@@ -45,14 +45,15 @@
       (println "http status:" (:status resp)))
 
   :else
-  (let [[peek totals reqs serves errs] (-> (:result parsed) first :results)]
+  (let [res (map :results (:result parsed))
+        [peek totals reqs serves errs] res]
     (println "newest ts:" (mapv :ts peek))
     (println "window:" since "→ now")
-    (println "totals:" totals)
+    (println "totals:" (first totals))
     (println)
     (println "by requested:")
     (doseq [r reqs]  (println "  " (:req r) "n=" (:n r) "ok=" (:ok_n r)))
     (println "by served:")
     (doseq [r serves] (println "  " (:sel r) "n=" (:n r) "ok=" (:ok_n r) "avg_ms=" (int (or (:avg_ms r) 0))))
     (println "failures:")
-    (doseq [r errs]  (println "  " (:err r) "n=" (:n r))))))
+    (doseq [r errs]  (println "  " (:err r) "n=" (:n r)))))

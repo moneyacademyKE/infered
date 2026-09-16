@@ -95,3 +95,31 @@
       (is (> (:totalSavingsUsd res) 0.003))
       (is (= 2 (:switchCount res)))
       (is (= "zai/glm-5.3-flash" (get-in res [:lastSwitch :toModel]))))))
+
+(deftest test-circuit-breaker-half-open-fail-fast
+  (testing "Single failure in half-open state immediately trips circuit back to open regardless of history"
+    (let [res (run-node-eval
+               "import { createMetricsStore, recordSample, getProviderStats, isCircuitOpen } from './src/router/metrics.js';
+                const store = createMetricsStore();
+                const key = 'node-flaky::ali/glm-5.3';
+                
+                // Initialize node with successes
+                for (let i = 0; i < 8; i++) {
+                  recordSample(store, 'node-flaky', 'ali/glm-5.3', { latencyMs: 100, success: true });
+                }
+                
+                // Force circuit to half-open state directly
+                store.providers[key].circuitState = 'half-open';
+                store.providers[key].circuitTrippedAt = Date.now() - 35000;
+                
+                // A probe request fails while in half-open state
+                recordSample(store, 'node-flaky', 'ali/glm-5.3', { latencyMs: 2000, success: false });
+                const reclosedStats = getProviderStats(store, 'node-flaky', 'ali/glm-5.3');
+                const reclosedIsOpen = isCircuitOpen(store, 'node-flaky', 'ali/glm-5.3');
+
+                console.log(JSON.stringify({
+                  finalState: reclosedStats.circuitState,
+                  reclosedIsOpen
+                }));")]
+      (is (= "open" (:finalState res)))
+      (is (true? (:reclosedIsOpen res))))))

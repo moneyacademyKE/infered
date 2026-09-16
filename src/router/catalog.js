@@ -11,7 +11,8 @@ export const MODEL_TIERS = {
   "cx/gpt-5.6-terra": { tier: "balanced-frontier", quality: 0.91, family: "openai", context: 128000 },
   "zai/glm-5.3": { tier: "agentic-coding", quality: 0.93, family: "z.ai", context: 1000000 },
   "zai/glm-5.3-flash": { tier: "fast-agentic", quality: 0.85, family: "z.ai", context: 1000000 },
-  "ali/kimi-k3": { tier: "moe-frontier", quality: 0.94, family: "moonshot", context: 1000000 }
+  "ali/kimi-k3": { tier: "moe-frontier", quality: 0.94, family: "moonshot", context: 1000000 },
+  "ali/qwen3.8-max": { tier: "frontier-flagship", quality: 0.96, family: "qwen", context: 1000000 }
 };
 
 // Official provider list prices in USD per 1M tokens [Prompt, Completion]
@@ -20,6 +21,7 @@ export const OFFICIAL_PRICES = {
   // ali-hosted glm-5.3 list price per the InferHub market feed (official_in/out,
   // verified 2026-09-15) — a different listing from zai-hosted glm-5.3 below.
   "ali/glm-5.3": { prompt: 1.40, completion: 4.40 },
+  "ali/qwen3.8-max": { prompt: 1.60, completion: 4.80 },
   "cx/gpt-5.6-terra": { prompt: 0.30, completion: 0.90 },
   "zai/glm-5.3": { prompt: 0.20, completion: 0.40 },
   "zai/glm-5.3-flash": { prompt: 0.06, completion: 0.10 },

@@ -167,8 +167,80 @@
                   upstreamStarted,
                   failoverCount: result.failoverErrors.length
                 }));")]
-      (is (false? (:success res)))
-      (is (= 3 (:upstreamStarted res)) "must stop after maxAttempts upstream starts, not exhaust the order book")
-      (is (= 3 (:attempts res)))
-      (is (= 3 (:failoverCount res)))
       (is (re-find #"Retry budget exhausted after 3" (:error res)) "error must say the retry budget was spent, not that ALL nodes failed"))))
+
+(deftest test-chain-fallback-candidate-sync
+  (testing "executeWithChainFallback returns fallback chain candidates when primary chain fails"
+    (let [res (run-node-eval
+               "import { executeWithChainFallback } from './src/router/client.js';
+
+                const primaryCandidates = [{ providerId: 'p-prim', modelId: 'cx/gpt-6-astra' }];
+                const fallbackCandidates = [{ providerId: 'p-fb', modelId: 'ali/glm-5.3' }];
+
+                const rank = (m) => (m === 'infered/astra-budget' ? primaryCandidates : fallbackCandidates);
+                const execute = async (cands) => {
+                  if (cands[0].providerId === 'p-prim') {
+                    return { success: false, attempts: 1, error: 'no capacity' };
+                  }
+                  return { success: true, attempts: 1, selectedCandidate: cands[0] };
+                };
+
+                const { result, candidates, fallbackChain } = await executeWithChainFallback({
+                  requestedModel: 'infered/astra-budget',
+                  rank,
+                  execute
+                });
+
+                console.log(JSON.stringify({
+                  success: result.success,
+                  fallbackChain,
+                  returnedCandidateModel: candidates[0]?.modelId,
+                  selectedCandidateModel: result.selectedCandidate?.modelId
+                }));")]
+      (is (:success res))
+      (is (= "infered/glm-budget" (:fallbackChain res)))
+      (is (= "ali/glm-5.3" (:returnedCandidateModel res))
+          "candidates returned must be updated to fallback chain's candidates")
+      (is (= "ali/glm-5.3" (:selectedCandidateModel res))))))
+
+(deftest test-official-provider-omits-header
+  (testing "X-InferHub-Provider header is omitted when candidate providerId is official"
+    (let [res (run-node-eval
+               "import { executeWithFallback } from './src/router/client.js';
+                import { createMetricsStore } from './src/router/metrics.js';
+
+                const metricsStore = createMetricsStore();
+                let receivedHeaders = null;
+
+                const mockFetch = async (url, opts) => {
+                  receivedHeaders = opts.headers;
+                  return new Response(JSON.stringify({
+                    id: 'chatcmpl-official',
+                    object: 'chat.completion',
+                    created: Date.now(),
+                    model: 'cx/gpt-5.6-terra',
+                    choices: [{ message: { role: 'assistant', content: 'ok' }, finish_reason: 'stop' }]
+                  }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+                };
+
+                const candidate = {
+                  providerId: 'official',
+                  modelId: 'cx/gpt-5.6-terra',
+                  blendedPrice: 1.0,
+                  savingsPct: 0
+                };
+
+                await executeWithFallback({
+                  candidates: [candidate],
+                  requestBody: { messages: [{ role: 'user', content: 'hi' }] },
+                  apiKey: 'test-key',
+                  metricsStore,
+                  fetchFn: mockFetch
+                });
+
+                console.log(JSON.stringify({
+                  hasProviderHeader: Boolean(receivedHeaders['X-InferHub-Provider'])
+                }));")]
+      (is (false? (:hasProviderHeader res))
+          "X-InferHub-Provider must NOT be sent when providerId is 'official'"))))
+

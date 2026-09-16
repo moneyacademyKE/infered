@@ -164,8 +164,17 @@ export function coerceArguments(argsObj, schemaProperties = {}, required = []) {
       if (normalizedExpected[norm]) {
         canonicalKey = normalizedExpected[norm];
       } else {
-        const synonyms = COMMON_SYNONYMS[norm] || [];
-        const synonymMatch = synonyms.find(syn => expectedKeys.includes(syn));
+        let synonymMatch = null;
+        for (const [canonical, synList] of Object.entries(COMMON_SYNONYMS)) {
+          if (canonical === norm || synList.includes(norm)) {
+            const found = expectedKeys.find(expKey => expKey === canonical || synList.includes(expKey));
+            if (found) {
+              synonymMatch = found;
+              break;
+            }
+          }
+        }
+
         if (synonymMatch) {
           canonicalKey = synonymMatch;
         } else {
@@ -244,14 +253,19 @@ export function healToolCalls(choices, toolDefinitions = []) {
       }
 
       const fnName = tc.function.name;
-      const rawArgsStr = tc.function.arguments;
+      const rawArgs = tc.function.arguments;
       const paramSchema = toolMap[fnName] || {};
       const properties = paramSchema.properties || {};
       const required = paramSchema.required || [];
 
       try {
-        const repairedJson = repairJsonString(rawArgsStr);
-        const parsed = JSON.parse(repairedJson);
+        let parsed;
+        if (typeof rawArgs === "object" && rawArgs !== null) {
+          parsed = rawArgs;
+        } else {
+          const repairedJson = repairJsonString(String(rawArgs || "{}"));
+          parsed = JSON.parse(repairedJson);
+        }
         const coerced = coerceArguments(parsed, properties, required);
         const finalArgsStr = JSON.stringify(coerced);
 
@@ -268,7 +282,7 @@ export function healToolCalls(choices, toolDefinitions = []) {
           ...tc,
           function: {
             ...tc.function,
-            arguments: repairJsonString(rawArgsStr)
+            arguments: typeof rawArgs === "string" ? repairJsonString(rawArgs) : JSON.stringify(rawArgs || {})
           }
         };
       }

@@ -378,3 +378,72 @@
           "starting at kimi drops flash and glm — the strong tail only")
       (is (= (:fullChain res) (:bogusChain res)) "a start model outside the chain is ignored, never an error")
       (is (= (:fullChain res) (:headChain res)) "starting at the head is a graceful no-op"))))
+
+(deftest test-monotonic-budget-ladder-custom-price
+  (testing "Custom maxFallbackPrice produces a strictly ascending monotonic ladder"
+    (let [res (run-node-eval
+               "import { rankCandidates } from './src/router/pareto.js';
+                import { createPriceCache, updateSpotPrices } from './src/router/pricing.js';
+                import { createMetricsStore } from './src/router/metrics.js';
+
+                const metricsStore = createMetricsStore();
+                const cache = createPriceCache([]);
+                // A quote at 0.22 - above standard 0.20, but below user ceiling 0.25
+                updateSpotPrices(cache, [
+                  { providerId: 'p-mid', modelId: 'zai/glm-5.3-flash', prompt: 0.05, completion: 0.22 }
+                ]);
+
+                // With maxFallbackPrice = 0.25, tier 0 should immediately accept 0.22 with budgetTier 0.25
+                const ranked = rankCandidates({
+                  model: 'infered/glm-budget',
+                  priceCache: cache,
+                  metricsStore,
+                  maxFallbackPrice: 0.25
+                });
+
+                console.log(JSON.stringify({
+                  winner: ranked[0]?.modelId,
+                  budgetTier: ranked[0]?.budgetTier,
+                  escalationLevel: ranked[0]?.escalationLevel
+                }));")]
+      (is (= "zai/glm-5.3-flash" (:winner res)))
+      (is (== 0.25 (:budgetTier res)))
+      (is (= 0 (:escalationLevel res))))))
+
+(deftest test-cascade-straggler-latency-penalty
+  (testing "Straggler nodes with high EMA latency are penalized in cascade candidate ranking"
+    (let [res (run-node-eval
+               "import { rankCandidates } from './src/router/pareto.js';
+                import { createPriceCache, updateSpotPrices } from './src/router/pricing.js';
+                import { createMetricsStore, recordSample } from './src/router/metrics.js';
+
+                const priceCache = createPriceCache([]);
+                const metricsStore = createMetricsStore();
+
+                // Two providers for ali/glm-5.3
+                // p-slow is slightly cheaper (0.030) but suffered 25s latency
+                // p-fast is slightly higher (0.038) but fast (1.2s latency)
+                updateSpotPrices(priceCache, [
+                  { providerId: 'p-slow', modelId: 'ali/glm-5.3', prompt: 0.01, completion: 0.030 },
+                  { providerId: 'p-fast', modelId: 'ali/glm-5.3', prompt: 0.01, completion: 0.038 }
+                ]);
+
+                recordSample(metricsStore, 'p-slow', 'ali/glm-5.3', { latencyMs: 25000, ttftMs: 24000, success: true });
+                recordSample(metricsStore, 'p-fast', 'ali/glm-5.3', { latencyMs: 1200, ttftMs: 600, success: true });
+
+                const ranked = rankCandidates({
+                  model: 'infered/glm-budget',
+                  priceCache,
+                  metricsStore
+                });
+
+                console.log(JSON.stringify({
+                  firstProvider: ranked[0]?.providerId,
+                  secondProvider: ranked[1]?.providerId,
+                  firstUtility: ranked[0]?.utility,
+                  secondUtility: ranked[1]?.utility
+                }));")]
+      (is (= "p-fast" (:firstProvider res))
+          "Fast healthy provider should beat 25s straggler despite microscopic price delta")
+      (is (= "p-slow" (:secondProvider res))))))
+

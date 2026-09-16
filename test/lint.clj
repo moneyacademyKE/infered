@@ -8,10 +8,14 @@
 
 (def max-loc 500)
 (def files
-  (concat
-   (fs/glob "src" "**/*.{js,clj}")
-   (fs/glob "test" "**/*.{clj,js}")
-   (fs/glob "." "*.{edn,json,jsonc,md}")))
+  (distinct
+   (concat
+    (fs/glob "src" "*.{js,clj}")
+    (fs/glob "src" "**/*.{js,clj}")
+    (fs/glob "test" "*.{clj,js}")
+    (fs/glob "test" "**/*.{clj,js}")
+    (fs/glob "scripts" "*.{clj,bb}")
+    (fs/glob "." "*.{edn,json,jsonc,md}"))))
 
 (def violations (atom []))
 
