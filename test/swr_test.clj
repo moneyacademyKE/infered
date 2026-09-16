@@ -19,8 +19,8 @@
                 const priceCache = createPriceCache();
                 const metricsStore = createMetricsStore();
 
-                // Sol is at $0.06
-                // Default threshold = 0.10 -> picks Sol
+                // glm-budget head is ali/glm-5.3 (seeded min ask $0.0352 out)
+                // Default threshold = 0.10 -> head serves (sol-budget reroutes to glm-budget)
                 const candDefault = rankCandidates({
                   model: 'infered/sol-budget',
                   priceCache,
@@ -28,7 +28,7 @@
                   maxFallbackPrice: 0.10
                 });
 
-                // User tightens threshold to 0.02 -> Sol at $0.06 > $0.02 -> must switch to Flash ($0.008)
+                // User tightens threshold to 0.02 -> head's $0.0352 > $0.02 -> must switch to Flash ($0.008)
                 const candTight = rankCandidates({
                   model: 'infered/sol-budget',
                   priceCache,
@@ -57,9 +57,10 @@
                   afterSpikeModel: candAfterSpike[0]?.modelId,
                   afterSpikePrice: candAfterSpike[0]?.outputTokenPrice
                 }));")]
-      ;; sol removed from chains: the cheap sol ask in the fixture is now
-      ;; invisible to sol-budget, so flash wins even at the loose threshold.
-      (is (= "zai/glm-5.3-flash" (:defaultModel res)))
+      ;; sol removed from chains and ali/glm-5.3 leads glm-budget (2026-09-15):
+      ;; the sol fixture asks are invisible to sol-budget, so the head wins at
+      ;; the loose threshold; only a 0.02 ceiling drops below its cheapest ask.
+      (is (= "ali/glm-5.3" (:defaultModel res)))
       (is (= "zai/glm-5.3-flash" (:tightModel res)))
-      (is (= "zai/glm-5.3-flash" (:afterSpikeModel res)))
+      (is (= "ali/glm-5.3" (:afterSpikeModel res)))
       (is (<= (:afterSpikePrice res) 0.10)))))

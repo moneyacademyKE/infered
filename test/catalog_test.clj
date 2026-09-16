@@ -27,7 +27,8 @@
       (is (> (count (:autoModels res)) 0))
       ;; sol removed 2026-09-05: sol-budget resolves to the glm-budget chain,
       ;; and raw-sol requests fall through to the sol-free auto cascade.
-      (is (= ["zai/glm-5.3-flash", "zai/glm-5.3", "ali/kimi-k3", "cx/gpt-5.6-terra"]
+      ;; ali/glm-5.3 leads the chain since 2026-09-15 (owner directive).
+      (is (= ["ali/glm-5.3", "zai/glm-5.3-flash", "zai/glm-5.3", "ali/kimi-k3", "cx/gpt-5.6-terra"]
              (:cascadeModels res)))
       (is (not-any? #(= "cx/gpt-5.6-sol" %) (:solExact res))
           "removed sol must resolve to a sol-free fallback, never to itself"))))
@@ -39,6 +40,7 @@
                 console.log(JSON.stringify({
                   solPrice: getOfficialPrice('cx/gpt-5.6-sol'),
                   glmFlashPrice: getOfficialPrice('zai/glm-5.3-flash'),
+                  aliGlmPrice: getOfficialPrice('ali/glm-5.3'),
                   kimiPrice: getOfficialPrice('ali/kimi-k3'),
                   terraPrice: getOfficialPrice('cx/gpt-5.6-terra'),
                   hasPrices: Object.keys(OFFICIAL_PRICES).length >= 4
@@ -46,6 +48,11 @@
       (is (:hasPrices res))
       ;; sol removed from catalog: lookup falls to the generic $1/$2 baseline
       (is (= 1 (get-in res [:solPrice :prompt])))
+      ;; ali/glm-5.3 official list price verified against the InferHub market
+      ;; feed 2026-09-15 (official_in 1.40 / official_out 4.40) — a different
+      ;; listing from zai-hosted glm-5.3 ($0.20/$0.40).
+      (is (= 1.4 (get-in res [:aliGlmPrice :prompt])))
+      (is (= 4.4 (get-in res [:aliGlmPrice :completion])))
       (is (> (get-in res [:glmFlashPrice :prompt]) 0))
       (is (> (get-in res [:kimiPrice :prompt]) 0))
       (is (> (get-in res [:terraPrice :prompt]) 0)))))
@@ -60,7 +67,7 @@
                   cascadeLookup: Boolean(CASCADE_CHAINS['infered/glm-budget']),
                   solBudgetStillReroutes: resolveVirtualModel('infered/sol-budget')
                 }));")]
-      (is (= ["zai/glm-5.3-flash", "zai/glm-5.3", "ali/kimi-k3", "cx/gpt-5.6-terra"]
+      (is (= ["ali/glm-5.3", "zai/glm-5.3-flash", "zai/glm-5.3", "ali/kimi-k3", "cx/gpt-5.6-terra"]
              (:glmBudgetModels res)))
       (is (not-any? #(= "cx/gpt-5.6-sol" %) (:glmBudgetModels res))
           "glm-budget must never include sol")
@@ -68,7 +75,7 @@
       (is (:cascadeLookup res) "must be a registered cascade chain")
       ;; slimmed 2026-09-05: sol names left the listing but old callers still
       ;; reroute to the glm-budget chain instead of erroring
-      (is (= ["zai/glm-5.3-flash", "zai/glm-5.3", "ali/kimi-k3", "cx/gpt-5.6-terra"]
+      (is (= ["ali/glm-5.3", "zai/glm-5.3-flash", "zai/glm-5.3", "ali/kimi-k3", "cx/gpt-5.6-terra"]
              (:solBudgetStillReroutes res))
           "legacy sol-budget callers reroute to the glm-budget chain"))))
 
@@ -103,8 +110,8 @@
                   removedPinned: resolveVirtualModel('infered/claude-3.5-sonnet'),
                   chainMemberDirect: resolveVirtualModel('zai/glm-5.3-flash')
                 }));")]
-      ;; bind-order note: the default chain is glm-budget's four-model cascade
-      (is (= ["zai/glm-5.3-flash" "zai/glm-5.3" "ali/kimi-k3" "cx/gpt-5.6-terra"]
+      ;; bind-order note: the default chain is glm-budget's five-model cascade
+      (is (= ["ali/glm-5.3" "zai/glm-5.3-flash" "zai/glm-5.3" "ali/kimi-k3" "cx/gpt-5.6-terra"]
              (:gm53Typo res))
           "the famous gm5.3 typo must land on the budget chain")
       (is (not-any? #(= "cx/gpt-5.6-sol" %) (:rawSol res))

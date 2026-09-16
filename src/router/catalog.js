@@ -17,6 +17,9 @@ export const MODEL_TIERS = {
 // Official provider list prices in USD per 1M tokens [Prompt, Completion]
 export const OFFICIAL_PRICES = {
   "cx/gpt-6-astra": { prompt: 10, completion: 50 },
+  // ali-hosted glm-5.3 list price per the InferHub market feed (official_in/out,
+  // verified 2026-09-15) — a different listing from zai-hosted glm-5.3 below.
+  "ali/glm-5.3": { prompt: 1.40, completion: 4.40 },
   "cx/gpt-5.6-terra": { prompt: 0.30, completion: 0.90 },
   "zai/glm-5.3": { prompt: 0.20, completion: 0.40 },
   "zai/glm-5.3-flash": { prompt: 0.06, completion: 0.10 },
@@ -24,8 +27,11 @@ export const OFFICIAL_PRICES = {
 };
 
 // Budget cascade ordering (sol removed 2026-09-05 per owner directive —
-// upstream no_capacity made it a liability; starts at glm-5.3-flash).
+// upstream no_capacity made it a liability). ali/glm-5.3 leads since
+// 2026-09-15 (owner directive): verified quotable on InferHub with min spot
+// ask $0.0352/M output — under the $0.10 ceiling, so the head truly serves.
 export const GLM_BUDGET_FALLBACK_CHAIN = [
+  "ali/glm-5.3",
   "zai/glm-5.3-flash",
   "zai/glm-5.3",
   "ali/kimi-k3",

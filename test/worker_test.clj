@@ -348,8 +348,8 @@
                 }));")]
       (is (= "ali/kimi-k3" (:strongSelected res))
           "glm-budget's strong link is kimi — flash/glm are skipped")
-      (is (= "zai/glm-5.3-flash" (:defaultSelected res))
-          "no tier header keeps the budget head")
-      (is (= "zai/glm-5.3-flash" (:bogusSelected res))
+      (is (= "ali/glm-5.3" (:defaultSelected res))
+          "no tier header keeps the budget head (ali/glm-5.3 leads since 2026-09-15)")
+      (is (= "ali/glm-5.3" (:bogusSelected res))
           "unknown tier values are ignored, never an error")
       (is (= 200 (:strongStatus res))))))
