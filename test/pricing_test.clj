@@ -131,3 +131,23 @@
       (is (= 1 (:v2Count res)) "ghost node from v1 is evicted when the market shrinks")
       (is (= 2 (:v3Count res)))
       (is (:stableIdSurvives res) "unchanged ask keeps its node id across syncs (breaker history survives)"))))
+
+(deftest test-seed-providers-evicted-on-live-ingest
+  (testing "synthetic seeds (inferhub-alpha/beta/gamma) are purged once live market data arrives for that model"
+    (let [res (run-node-eval
+               "import { createPriceCache, ingestInferHubModelsResponse, getQuotesForModel } from './src/router/pricing.js';
+
+                const cache = createPriceCache();
+                const liveData = { data: [{ id: 'zai/glm-5.3-flash', pricing: { asks_in: [0.010], asks_out: [0.040] } }] };
+
+                ingestInferHubModelsResponse(cache, liveData);
+                const flashProviders = getQuotesForModel(cache, 'zai/glm-5.3-flash').map(q => q.providerId);
+
+                console.log(JSON.stringify({
+                  count: flashProviders.length,
+                  hasOnlyLiveNodes: flashProviders.every(p => p.startsWith('inferhub-node-')),
+                  noSeedProviders: !flashProviders.some(p => ['inferhub-alpha', 'inferhub-beta', 'inferhub-gamma'].includes(p))
+                }));")]
+      (is (= 1 (:count res)))
+      (is (true? (:hasOnlyLiveNodes res)))
+      (is (true? (:noSeedProviders res))))))

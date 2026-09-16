@@ -158,17 +158,19 @@ function getInferHubNodeId(modelId, pIn, pOut) {
 }
 
 // Ghost-node eviction (H4): a model's fresh ask set is the whole truth about
-// the market — any inferhub-node quote left over from an earlier payload is
-// a ghost that can win routing or fake capacity. Seeded default providers
-// (inferhub-alpha/beta/gamma) are not inferhub-nodes and are untouched.
+// the market. Once live quotes arrive for a model, initial synthetic seeds
+// (inferhub-alpha/beta/gamma) are purged so phantom capacity cannot win routing,
+// and any inferhub-node not in the fresh ask set is evicted.
 function evictStaleInferHubNodes(cache, freshKeysByModel) {
   for (const [modelId, freshKeys] of freshKeysByModel) {
     const providerSet = cache.modelToProviders[modelId];
     if (!providerSet) continue;
     for (const provId of Array.from(providerSet)) {
-      if (!provId.startsWith("inferhub-node-")) continue;
       const key = getQuoteKey(provId, modelId);
-      if (!freshKeys.has(key)) {
+      if (provId === "inferhub-alpha" || provId === "inferhub-beta" || provId === "inferhub-gamma") {
+        delete cache.quotes[key];
+        providerSet.delete(provId);
+      } else if (provId.startsWith("inferhub-node-") && !freshKeys.has(key)) {
         delete cache.quotes[key];
         providerSet.delete(provId);
       }

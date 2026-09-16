@@ -8,7 +8,7 @@ import { resolveSessionId, getSessionPin, recordSessionPin } from "./router/sess
 import { healToolCalls } from "./router/healer.js";
 import { createExemplarStore, recordToolOutcome, enrichPromptWithToolExemplars } from "./router/exemplars.js";
 import { rankCandidates, DEFAULT_WEIGHTS, ROUTING_POLICIES } from "./router/pareto.js";
-import { executeWithFallback } from "./router/client.js";
+import { executeWithFallback, executeWithChainFallback } from "./router/client.js";
 import { collectAnalytics, renderAnalyticsPage } from "./ui/analytics.js";
 
 let globalPriceCache = null;
@@ -318,9 +318,10 @@ export default {
           }
         }
 
-        // 3. Candidate ranking with strict output token budget ceiling
-        const candidates = rankCandidates({
-          model: requestedModel,
+        // 3. Candidate ranking with chain fallback and strict output token budget ceiling
+        const fetchFn = (apiKey && apiKey !== "test-key") ? fetch : createStandaloneMockFetch();
+        const rank = (m) => rankCandidates({
+          model: m,
           priceCache,
           metricsStore,
           weights,
@@ -329,40 +330,31 @@ export default {
           sessionAffinityModel: sessionAffinity?.modelId,
           startAtModel
         });
+        const execute = (cands) => {
+          let body = requestBody;
+          if (body.tools && Array.isArray(body.tools) && cands[0]) {
+            body = enrichPromptWithToolExemplars(body, cands[0].modelId);
+          }
+          return executeWithFallback({
+            candidates: cands,
+            requestBody: body,
+            apiKey,
+            metricsStore,
+            fetchFn,
+            baseUrl,
+            requestSignal: request.signal
+          });
+        };
 
-        if (candidates.length === 0) {
-          return jsonResponse({
-            error: {
-              message: `No candidate providers found under current constraints for: ${requestedModel}`,
-              type: "invalid_request_error"
-            }
-          }, 400);
-        }
-
-        const selected = candidates[0];
-
-        // 4. Continuous Tool Learning: Enrich prompt with dynamic exemplars if routing to budget models
-        if (requestBody.tools && Array.isArray(requestBody.tools)) {
-          requestBody = enrichPromptWithToolExemplars(requestBody, selected.modelId);
-        }
-
-        const fetchFn = (apiKey && apiKey !== "test-key") ? fetch : createStandaloneMockFetch();
-
-        const result = await executeWithFallback({
-          candidates,
-          requestBody,
-          apiKey,
-          metricsStore,
-          fetchFn,
-          baseUrl,
-          requestSignal: request.signal
+        const { result, candidates, fallbackChain } = await executeWithChainFallback({
+          requestedModel,
+          rank,
+          execute
         });
 
         if (!result.success) {
           ctx.waitUntil(recordRoutingAnalytics(env, {
             ok: false,
-            // No `model` here: a failed request never selected anything, so
-            // selected_model stays NULL instead of leaking the chain name.
             requestedModel,
             attempts: result.attempts || 0,
             budgetCap: maxFallbackPrice,
@@ -371,17 +363,14 @@ export default {
           }));
           return jsonResponse({
             error: {
-              message: result.error,
-              type: "provider_error",
+              message: result.error || `No candidate providers found under current constraints for: ${requestedModel}`,
+              type: result.attempts === 0 ? "invalid_request_error" : "provider_error",
               failovers: result.failoverErrors
             }
-          }, result.status || 502);
+          }, result.status || (result.attempts === 0 ? 400 : 502));
         }
 
-        // Report and pin the candidate that ACTUALLY served the request —
-        // candidates[0] can fail over silently (attempts > 1), and headers
-        // or session affinity pointing at a model that never answered is
-        // exactly the kind of fiction this router must not tell.
+        const selected = candidates[0];
         const served = result.selectedCandidate || selected;
 
         let responseBody = result.responseBody;
@@ -396,7 +385,7 @@ export default {
           // Record tool learning telemetry
           for (const c of healedChoices) {
             for (const tc of c.message?.tool_calls || []) {
-              recordToolOutcome(exemplarStore, tc.function?.name, selected.modelId, true, tc._healed);
+              recordToolOutcome(exemplarStore, tc.function?.name, served.modelId, true, tc._healed);
             }
           }
         }
