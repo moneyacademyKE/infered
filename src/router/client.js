@@ -8,67 +8,52 @@ import { recordSample, recordUsage } from "./metrics.js";
 import { getOfficialPrice, CHAIN_FALLBACKS } from "./catalog.js";
 
 const DEFAULT_TIMEOUT_MS = 25000;
-const DEFAULT_FIRST_CONTENT_TIMEOUT_MS = 120000;
+const DEFAULT_FIRST_BYTE_TIMEOUT_MS = 15000;
 
-// Failover window: a stream that hasn't produced a CONTENT token yet has shown
-// the client nothing, so dying here is a candidate failure like any other.
-// Role/reasoning-only frames are buffered and replayed once content arrives.
-const CONTENT_NEEDLE = '"content":"';
-const MAX_PRECONTENT_BUFFER_BYTES = 4 * 1024 * 1024;
+// Failover window: a stream that hasn't sent its FIRST BYTE has shown the
+// client nothing, so dying there is a candidate failure like any other. The
+// first byte — not the first content token — is the commit point: reasoning
+// models can stream role/reasoning frames for a minute before any content,
+// and holding client bytes that long turns failover safety into a TTFB
+// blackout (measured 82s on kimi-glm). Everything after byte one relays live.
+const MAX_FIRST_CHUNK_BYTES = 1 * 1024 * 1024;
 
-function windowHasContentToken(window) {
-  let idx = window.indexOf(CONTENT_NEEDLE);
-  while (idx !== -1) {
-    // Empty content is exactly "content":""; anything else (incl. escaped
-    // quotes) means a real token. "content":null never matches the needle.
-    if (window[idx + CONTENT_NEEDLE.length] !== '"') return true;
-    idx = window.indexOf(CONTENT_NEEDLE, idx + 1);
+async function readFirstUpstreamChunk(reader, signal, deadlineMs) {
+  if (signal && signal.aborted) {
+    return { ok: false, reason: "Client disconnected", clientGone: true };
   }
-  return false;
-}
-
-async function readUpToFirstContent(reader, signal, deadlineMs) {
-  const decoder = new TextDecoder();
-  const buffered = [];
-  let carry = "";
-  let totalBytes = 0;
-  const deadline = Date.now() + deadlineMs;
-
-  for (;;) {
-    if (signal && signal.aborted) {
-      return { ok: false, reason: "Client disconnected", clientGone: true };
+  let timer;
+  try {
+    const result = await Promise.race([
+      reader.read(),
+      new Promise((resolve) => { timer = setTimeout(() => resolve({ timeout: true }), deadlineMs); })
+    ]);
+    if (timer) clearTimeout(timer);
+    if (result.timeout) {
+      return { ok: false, reason: "Upstream sent no bytes within the deadline", clientGone: false };
     }
-    let chunk;
-    try {
-      const result = await reader.read();
-      if (result.done) {
-        return { ok: false, reason: "Upstream stream ended before producing any content tokens", clientGone: false };
-      }
-      chunk = result.value;
-    } catch (err) {
-      const clientGone = Boolean(signal && signal.aborted);
-      return {
-        ok: false,
-        reason: clientGone ? "Client disconnected" : "Upstream stream errored before first content token",
-        clientGone
-      };
+    if (result.done) {
+      return { ok: false, reason: "Upstream stream ended before sending any bytes", clientGone: false };
     }
-
-    buffered.push(chunk);
-    totalBytes += chunk.byteLength;
-    if (totalBytes > MAX_PRECONTENT_BUFFER_BYTES) {
-      return { ok: false, reason: "Upstream exceeded the pre-content buffer limit", clientGone: false };
+    const chunk = result.value;
+    if (chunk.byteLength > MAX_FIRST_CHUNK_BYTES) {
+      return { ok: false, reason: "Upstream first chunk exceeded the size limit", clientGone: false };
     }
-
-    const window = carry + decoder.decode(chunk, { stream: true });
-    if (windowHasContentToken(window)) return { ok: true, buffered };
-    if (window.includes("[DONE]")) {
+    // A stream whose first bytes are already [DONE] is an empty completion,
+    // not a usable candidate — fail over like any other miss.
+    const head = new TextDecoder().decode(chunk.slice(0, 4096));
+    if (head.includes("[DONE]") && !head.includes('"content":"')) {
       return { ok: false, reason: "Upstream stream completed without any content tokens", clientGone: false };
     }
-    if (Date.now() > deadline) {
-      return { ok: false, reason: "Upstream produced no content within the deadline", clientGone: false };
-    }
-    carry = window.slice(-32);
+    return { ok: true, buffered: [chunk] };
+  } catch (err) {
+    if (timer) clearTimeout(timer);
+    const clientGone = Boolean(signal && signal.aborted);
+    return {
+      ok: false,
+      reason: clientGone ? "Client disconnected" : "Upstream stream errored before first byte",
+      clientGone
+    };
   }
 }
 
@@ -113,7 +98,7 @@ async function executeCandidateRequest({
   fetchFn = fetch,
   baseUrl = "https://api.inferhub.dev/v1",
   timeoutMs = DEFAULT_TIMEOUT_MS,
-  firstContentTimeoutMs = DEFAULT_FIRST_CONTENT_TIMEOUT_MS,
+  firstByteTimeoutMs = DEFAULT_FIRST_BYTE_TIMEOUT_MS,
   requestSignal = null,
   onStreamOutcome = null
 }) {
@@ -178,11 +163,11 @@ async function executeCandidateRequest({
         return { latencyMs: totalMs, ttftMs, success: true };
       };
 
-      // Hold until first content: nothing shown to the client yet, so a dead
-      // or empty stream here is just a candidate failure — the fallback loop
-      // moves to the next candidate and the client never sees the corpse.
+      // Hold until first byte: nothing shown to the client yet, so a dead,
+      // hung, or empty stream here is just a candidate failure — the fallback
+      // loop moves to the next candidate and the client never sees the corpse.
       const reader = response.body.getReader();
-      const prefix = await readUpToFirstContent(reader, requestSignal, firstContentTimeoutMs);
+      const prefix = await readFirstUpstreamChunk(reader, requestSignal, firstByteTimeoutMs);
       if (!prefix.ok) {
         detachClientAbort();
         try { await reader.cancel(); } catch {}
@@ -246,7 +231,7 @@ export function executeWithFallback({
   fetchFn = fetch,
   baseUrl = "https://api.inferhub.dev/v1",
   timeoutMs = DEFAULT_TIMEOUT_MS,
-  firstContentTimeoutMs = DEFAULT_FIRST_CONTENT_TIMEOUT_MS,
+  firstByteTimeoutMs = DEFAULT_FIRST_BYTE_TIMEOUT_MS,
   requestSignal = null,
   onStreamOutcome = null,
   maxAttempts = 10
@@ -272,7 +257,7 @@ export function executeWithFallback({
         fetchFn,
         baseUrl,
         timeoutMs,
-        firstContentTimeoutMs,
+        firstByteTimeoutMs,
         requestSignal,
         onStreamOutcome
       });

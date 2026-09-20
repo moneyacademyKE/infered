@@ -244,25 +244,18 @@
       (is (false? (:hasProviderHeader res))
           "X-InferHub-Provider must NOT be sent when providerId is 'official'"))))
 
-(deftest test-stream-failover-before-first-content
-  (testing "Upstream stream that ends before any content token fails over to the next candidate"
+(deftest test-stream-failover-on-zero-byte-candidate
+  (testing "Upstream that sends NO bytes within the deadline is a dead candidate — fail over, client never sees it"
     (let [res (run-node-eval
                "import { executeWithFallback } from './src/router/client.js';
-                import { createMetricsStore, getProviderStats } from './src/router/metrics.js';
+                import { createMetricsStore } from './src/router/metrics.js';
 
                 const metricsStore = createMetricsStore();
 
-                // Reasoning model that streams role + reasoning frames then dies (no content, no DONE)
-                const deadStreamFetch = async (url, opts) => {
-                  if (opts.headers['X-InferHub-Provider'] === 'reasoning-node') {
-                    return new Response(new ReadableStream({
-                      start(c) {
-                        const enc = new TextEncoder();
-                        c.enqueue(enc.encode('data: ' + JSON.stringify({ choices: [{ delta: { content: '', role: 'assistant', reasoning_content: '' } }] }) + '\\n\\n'));
-                        c.enqueue(enc.encode('data: ' + JSON.stringify({ choices: [{ delta: { reasoning_content: 'thinking...' } }] }) + '\\n\\n'));
-                        c.close(); // EOF before any content — the dropped-stream disease
-                      }
-                    }), { status: 200, headers: { 'Content-Type': 'text/event-stream' } });
+                // Hung upstream: 200 + stream headers, then silence — not one byte
+                const hungFetch = async (url, opts) => {
+                  if (opts.headers['X-InferHub-Provider'] === 'hung-node') {
+                    return new Response(new ReadableStream({ start() {} }), { status: 200, headers: { 'Content-Type': 'text/event-stream' } });
                   }
                   return new Response(JSON.stringify({
                     choices: [{ message: { role: 'assistant', content: 'served by flash' }, finish_reason: 'stop' }]
@@ -271,28 +264,78 @@
 
                 const result = await executeWithFallback({
                   candidates: [
-                    { providerId: 'reasoning-node', modelId: 'ali/glm-5.3', savingsPct: 97, blendedPrice: 0.05 },
+                    { providerId: 'hung-node', modelId: 'ali/kimi-k3', savingsPct: 96, blendedPrice: 0.04 },
                     { providerId: 'flash-node', modelId: 'zai/glm-5.3-flash', savingsPct: 99, blendedPrice: 0.01 }
                   ],
                   requestBody: { stream: true, messages: [{ role: 'user', content: 'hi' }] },
                   apiKey: 'test-key',
                   metricsStore,
-                  fetchFn: deadStreamFetch
+                  fetchFn: hungFetch,
+                  firstByteTimeoutMs: 100
                 });
 
                 console.log(JSON.stringify({
                   success: result.success,
                   selectedProvider: result.selectedCandidate?.providerId,
                   attempts: result.attempts,
-                  firstError: result.failoverErrors?.[0]?.error,
-                  reasoningNodeFailed: getProviderStats(metricsStore, 'reasoning-node', 'ali/glm-5.3').failedRequests
+                  firstError: result.failoverErrors?.[0]?.error
                 }));")]
       (is (:success res))
       (is (= "flash-node" (:selectedProvider res))
-          "stream that dies before first content must fail over to next candidate")
+          "zero-byte upstream must fail over — the client never sees the corpse")
       (is (= 2 (:attempts res)))
-      (is (re-find #"before producing any content|stream ended" (str (:firstError res))))
-      (is (= 1 (:reasoningNodeFailed res)) "the dead stream must be recorded as a candidate failure"))))
+      (is (re-find #"no bytes within the deadline" (str (:firstError res)))))))
+
+(deftest test-mid-reasoning-death-commits-and-reports
+  (testing "Bytes already shipped = committed: mid-reasoning death cannot fail over but MUST be reported"
+    (let [res (run-node-eval
+               "import { executeWithFallback } from './src/router/client.js';
+                import { createMetricsStore } from './src/router/metrics.js';
+
+                const metricsStore = createMetricsStore();
+                const outcomes = [];
+                const enc = new TextEncoder();
+                const sseFrame = (delta) => 'data: ' + JSON.stringify({ choices: [{ delta }] }) + '\\n\\n';
+
+                // Reasoning model: streams role + reasoning frames (real bytes!), then dies
+                const fetchFn = async () => new Response(new ReadableStream({
+                  start(c) {
+                    c.enqueue(enc.encode(sseFrame({ content: '', role: 'assistant', reasoning_content: '' })));
+                    c.enqueue(enc.encode(sseFrame({ reasoning_content: 'thinking...' })));
+                    setTimeout(() => c.error(new Error('upstream connection reset')), 25);
+                  }
+                }), { status: 200, headers: { 'Content-Type': 'text/event-stream' } });
+
+                const result = await executeWithFallback({
+                  candidates: [{ providerId: 'reasoning-node', modelId: 'ali/glm-5.3', savingsPct: 97, blendedPrice: 0.05 }],
+                  requestBody: { stream: true, messages: [{ role: 'user', content: 'hi' }] },
+                  apiKey: 'test-key',
+                  metricsStore,
+                  fetchFn,
+                  onStreamOutcome: (o) => outcomes.push(o)
+                });
+
+                const reader = result.stream.getReader();
+                const dec = new TextDecoder();
+                let received = '';
+                try { for (;;) { const { done, value } = await reader.read(); if (done) break; received += dec.decode(value, { stream: true }); } } catch (e) {}
+                await new Promise((r) => setTimeout(r, 30));
+
+                console.log(JSON.stringify({
+                  success: result.success,
+                  attempts: result.attempts,
+                  selectedProvider: result.selectedCandidate?.providerId,
+                  gotReasoningBytes: received.includes('thinking...'),
+                  outcomeCount: outcomes.length,
+                  firstOutcome: outcomes[0] ? { ok: outcomes[0].ok, error: outcomes[0].error } : null
+                }));")]
+      (is (:success res) "committed at first byte — selection reports success")
+      (is (= 1 (:attempts res)) "no failover once bytes reached the client")
+      (is (= "reasoning-node" (:selectedProvider res)))
+      (is (:gotReasoningBytes res) "reasoning bytes already shipped must reach the client live")
+      (is (= 1 (:outcomeCount res)) "exactly one stream outcome reported")
+      (is (= "upstream_stream_died" (get-in res [:firstOutcome :error]))
+          "mid-reasoning death must land in the ledger, not vanish"))))
 
 (deftest test-stream-prefix-replay-preserves-frames
   (testing "Buffered prefix (role + reasoning frames) is replayed before remaining stream"
@@ -391,22 +434,21 @@
       (is (= "upstream_stream_died" (get-in res [:firstOutcome :error]))
           "mid-stream upstream death must be visible, not swallowed"))))
 
-(deftest test-client-abort-during-precontent-buffer
-  (testing "Client disconnect while waiting for first content aborts cleanly with 499"
+(deftest test-client-abort-during-pre-first-byte-wait
+  (testing "Client disconnect while waiting for the FIRST BYTE aborts cleanly with 499"
     (let [res (run-node-eval
                "import { executeWithFallback } from './src/router/client.js';
                 import { createMetricsStore } from './src/router/metrics.js';
 
                 const metricsStore = createMetricsStore();
                 const ac = new AbortController();
-                const enc = new TextEncoder();
 
-                // Streams one reasoning frame then hangs until the abort tears it down
-                const hangingStreamFetch = (url, opts) => new Promise((resolve) => {
+                // Upstream accepted the request but never sends a byte; the abort
+                // tears the stream down mid-wait
+                const silentFetch = (url, opts) => new Promise((resolve) => {
                   setTimeout(() => {
                     resolve(new Response(new ReadableStream({
                       start(c) {
-                        c.enqueue(enc.encode('data: ' + JSON.stringify({ choices: [{ delta: { reasoning_content: '...' } }] }) + '\\n\\n'));
                         opts.signal.addEventListener('abort', () => {
                           try { c.error(new Error('connection torn down by client abort')); } catch {}
                         });
@@ -422,9 +464,9 @@
                   requestBody: { stream: true, messages: [{ role: 'user', content: 'hi' }] },
                   apiKey: 'test-key',
                   metricsStore,
-                  fetchFn: hangingStreamFetch,
+                  fetchFn: silentFetch,
                   requestSignal: ac.signal,
-                  firstContentTimeoutMs: 5000
+                  firstByteTimeoutMs: 5000
                 });
 
                 console.log(JSON.stringify({
