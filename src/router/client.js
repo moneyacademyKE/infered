@@ -6,90 +6,14 @@
 
 import { recordSample, recordUsage } from "./metrics.js";
 import { getOfficialPrice, CHAIN_FALLBACKS } from "./catalog.js";
+import { executeStreamingWithSplice, DEFAULT_FIRST_BYTE_TIMEOUT_MS } from "./stream.js";
 
 const DEFAULT_TIMEOUT_MS = 25000;
-const DEFAULT_FIRST_BYTE_TIMEOUT_MS = 15000;
 
-// Failover window: a stream that hasn't sent its FIRST BYTE has shown the
-// client nothing, so dying there is a candidate failure like any other. The
-// first byte — not the first content token — is the commit point: reasoning
-// models can stream role/reasoning frames for a minute before any content,
-// and holding client bytes that long turns failover safety into a TTFB
-// blackout (measured 82s on kimi-glm). Everything after byte one relays live.
-const MAX_FIRST_CHUNK_BYTES = 1 * 1024 * 1024;
-
-async function readFirstUpstreamChunk(reader, signal, deadlineMs) {
-  if (signal && signal.aborted) {
-    return { ok: false, reason: "Client disconnected", clientGone: true };
-  }
-  let timer;
-  try {
-    const result = await Promise.race([
-      reader.read(),
-      new Promise((resolve) => { timer = setTimeout(() => resolve({ timeout: true }), deadlineMs); })
-    ]);
-    if (timer) clearTimeout(timer);
-    if (result.timeout) {
-      return { ok: false, reason: "Upstream sent no bytes within the deadline", clientGone: false };
-    }
-    if (result.done) {
-      return { ok: false, reason: "Upstream stream ended before sending any bytes", clientGone: false };
-    }
-    const chunk = result.value;
-    if (chunk.byteLength > MAX_FIRST_CHUNK_BYTES) {
-      return { ok: false, reason: "Upstream first chunk exceeded the size limit", clientGone: false };
-    }
-    // A stream whose first bytes are already [DONE] is an empty completion,
-    // not a usable candidate — fail over like any other miss.
-    const head = new TextDecoder().decode(chunk.slice(0, 4096));
-    if (head.includes("[DONE]") && !head.includes('"content":"')) {
-      return { ok: false, reason: "Upstream stream completed without any content tokens", clientGone: false };
-    }
-    return { ok: true, buffered: [chunk] };
-  } catch (err) {
-    if (timer) clearTimeout(timer);
-    const clientGone = Boolean(signal && signal.aborted);
-    return {
-      ok: false,
-      reason: clientGone ? "Client disconnected" : "Upstream stream errored before first byte",
-      clientGone
-    };
-  }
-}
-
-// Replays the buffered prefix, then streams the remainder. If the upstream
-// dies mid-flight it reports through onStreamOutcome — the exact hook that
-// makes previously-invisible stream deaths land in the decision ledger.
-function createReplayingStream({ buffered, reader, onStreamOutcome, requestSignal, getMetrics, onDone }) {
-  const ts = new TransformStream({
-    transform(chunk, controller) { controller.enqueue(chunk); }
-  });
-  (async () => {
-    const writer = ts.writable.getWriter();
-    try {
-      for (const chunk of buffered) await writer.write(chunk);
-      for (;;) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        await writer.write(value);
-      }
-      await writer.close();
-    } catch (err) {
-      try { await writer.abort(err); } catch {}
-      const clientGone = Boolean(requestSignal && requestSignal.aborted);
-      if (onStreamOutcome) {
-        onStreamOutcome({
-          ok: false,
-          error: clientGone ? "client_disconnected" : "upstream_stream_died",
-          metrics: getMetrics()
-        });
-      }
-    } finally {
-      if (onDone) onDone();
-    }
-  })();
-  return ts.readable;
-}
+// Streaming lives in ./stream.js: the splice executor commits at the first
+// upstream byte (TTFB honesty) but keeps classifying what it relays — a
+// contentless end (bare EOF, in-band error frame, empty [DONE]) is a candidate
+// failure that splices the next node into the same client stream.
 
 async function executeCandidateRequest({
   candidate,
@@ -98,12 +22,9 @@ async function executeCandidateRequest({
   fetchFn = fetch,
   baseUrl = "https://api.inferhub.dev/v1",
   timeoutMs = DEFAULT_TIMEOUT_MS,
-  firstByteTimeoutMs = DEFAULT_FIRST_BYTE_TIMEOUT_MS,
-  requestSignal = null,
-  onStreamOutcome = null
+  requestSignal = null
 }) {
   const startTime = Date.now();
-  let firstTokenTime = null;
 
   const upstreamBody = {
     ...requestBody,
@@ -125,9 +46,10 @@ async function executeCandidateRequest({
     if (requestSignal) requestSignal.removeEventListener("abort", abortFromClient);
   };
 
+  // Non-stream path only — stream:true is delegated to ./stream.js upstream.
   const headers = {
     "Content-Type": "application/json",
-    "Accept": requestBody.stream ? "text/event-stream" : "application/json"
+    "Accept": "application/json"
   };
   if (candidate.providerId && candidate.providerId !== "official") {
     headers["X-InferHub-Provider"] = candidate.providerId;
@@ -153,47 +75,6 @@ async function executeCandidateRequest({
         status: response.status,
         error: `Provider ${candidate.providerId} (${candidate.modelId}) returned ${response.status}: ${errText}`,
         latencyMs: Date.now() - startTime
-      };
-    }
-
-    if (requestBody.stream && response.body) {
-      const getMetrics = () => {
-        const totalMs = Date.now() - startTime;
-        const ttftMs = firstTokenTime ? firstTokenTime - startTime : totalMs;
-        return { latencyMs: totalMs, ttftMs, success: true };
-      };
-
-      // Hold until first byte: nothing shown to the client yet, so a dead,
-      // hung, or empty stream here is just a candidate failure — the fallback
-      // loop moves to the next candidate and the client never sees the corpse.
-      const reader = response.body.getReader();
-      const prefix = await readFirstUpstreamChunk(reader, requestSignal, firstByteTimeoutMs);
-      if (!prefix.ok) {
-        detachClientAbort();
-        try { await reader.cancel(); } catch {}
-        return {
-          success: false,
-          status: prefix.clientGone ? 499 : 503,
-          error: prefix.reason,
-          latencyMs: Date.now() - startTime
-        };
-      }
-      firstTokenTime = Date.now();
-
-      const stream = createReplayingStream({
-        buffered: prefix.buffered,
-        reader,
-        onStreamOutcome,
-        requestSignal,
-        getMetrics,
-        onDone: detachClientAbort
-      });
-
-      return {
-        success: true,
-        status: 200,
-        stream,
-        getMetrics
       };
     }
 
@@ -241,6 +122,16 @@ export function executeWithFallback({
       throw new Error("No candidate providers available for routing.");
     }
 
+    // Streaming goes through the splice executor: commit at the first upstream
+    // byte, classify what is relayed, and splice the next candidate into the
+    // SAME client stream whenever one ends without producing content.
+    if (requestBody && requestBody.stream) {
+      return executeStreamingWithSplice({
+        candidates, requestBody, apiKey, metricsStore, fetchFn, baseUrl,
+        timeoutMs, firstByteTimeoutMs, requestSignal, onStreamOutcome, maxAttempts
+      });
+    }
+
     const errors = [];
 
     for (const candidate of candidates) {
@@ -257,9 +148,7 @@ export function executeWithFallback({
         fetchFn,
         baseUrl,
         timeoutMs,
-        firstByteTimeoutMs,
-        requestSignal,
-        onStreamOutcome
+        requestSignal
       });
 
       if (result.success) {

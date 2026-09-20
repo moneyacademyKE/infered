@@ -351,11 +351,13 @@ export default {
         // ranked favorite.
         const recordDecision = (metrics, overrides = {}) => ctx.waitUntil(recordRoutingAnalytics(env, {
           ok: true,
-          model: served.modelId,
+          // Spliced streams: the candidate that COMMITTED the response is not
+          // always the one that ANSWERED — getMetrics carries the final truth.
+          model: metrics.servedModel || served.modelId,
           requestedModel,
-          provider: served.providerId,
+          provider: metrics.servedProvider || served.providerId,
           escalationLevel: served.escalationLevel ?? 0,
-          attempts: result.attempts || 1,
+          attempts: metrics.attempts || result.attempts || 1,
           // Wall-clock fallback: covers any shape where the executor's own
           // measurement is missing (cache-served, aborted stream flush).
           latencyMs: metrics.latencyMs || (Date.now() - requestStart),

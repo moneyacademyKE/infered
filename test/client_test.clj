@@ -326,16 +326,22 @@
                   attempts: result.attempts,
                   selectedProvider: result.selectedCandidate?.providerId,
                   gotReasoningBytes: received.includes('thinking...'),
+                  hasCleanError: received.includes('all candidates exhausted before content'),
+                  hasDone: received.includes('[DONE]'),
+                  failoverError: result.failoverErrors && result.failoverErrors[0] ? result.failoverErrors[0].error : null,
                   outcomeCount: outcomes.length,
                   firstOutcome: outcomes[0] ? { ok: outcomes[0].ok, error: outcomes[0].error } : null
                 }));")]
       (is (:success res) "committed at first byte — selection reports success")
-      (is (= 1 (:attempts res)) "no failover once bytes reached the client")
+      (is (= 1 (:attempts res)) "single candidate engaged")
       (is (= "reasoning-node" (:selectedProvider res)))
       (is (:gotReasoningBytes res) "reasoning bytes already shipped must reach the client live")
+      (is (= "stream_errored_pre_content" (:failoverError res)) "the specific death is preserved in failoverErrors")
+      (is (:hasCleanError res) "client gets a clean in-band provider error, never a bare connection drop")
+      (is (:hasDone res) "and a proper [DONE] terminator")
       (is (= 1 (:outcomeCount res)) "exactly one stream outcome reported")
-      (is (= "upstream_stream_died" (get-in res [:firstOutcome :error]))
-          "mid-reasoning death must land in the ledger, not vanish"))))
+      (is (= "all_candidates_exhausted_pre_content" (get-in res [:firstOutcome :error]))
+          "with no splice target left, exhaustion is the honest terminal state — and it lands in the ledger"))))
 
 (deftest test-stream-prefix-replay-preserves-frames
   (testing "Buffered prefix (role + reasoning frames) is replayed before remaining stream"
