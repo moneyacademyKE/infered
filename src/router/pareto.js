@@ -1,7 +1,7 @@
 /**
  * Pareto Multi-Objective Routing Engine & Ordered Budget Cascade with Elastic Escalation
  * Balances price savings, speed (EMA latency / TTFT), capability, KV prefix cache session affinity,
- * and progressive budget ceiling escalation ($0.10 -> $0.20 -> $0.30 -> zero-downtime fallback).
+ * and progressive budget ceiling escalation ($0.50 -> any verified spot ask -> zero-downtime fallback).
  */
 
 import { resolveVirtualModel, getModelMetadata, CASCADE_CHAINS, CEILING_EXEMPT_MODELS } from "./catalog.js";
@@ -19,11 +19,20 @@ export const ROUTING_POLICIES = {
   "cost-optimized": { price: 0.8, speed: 0.1, quality: 0.1 },
   "speed-first": { price: 0.1, speed: 0.8, quality: 0.1 },
   "quality-first": { price: 0.1, speed: 0.2, quality: 0.7 },
-  "budget-cascade": { price: 0.6, speed: 0.2, quality: 0.2, maxFallbackPrice: 0.10 }
+  "budget-cascade": { price: 0.6, speed: 0.2, quality: 0.2 }
 };
 
 const CACHE_AFFINITY_BONUS = 0.25;
-export const DEFAULT_BUDGET_LADDER = [0.10, 0.20, 0.30, Infinity];
+// Tier-0 ceiling raised $0.10 -> $0.50 (bk-dba7, data-driven). Ledger evidence:
+// 51k rows, escalation rungs 0.20/0.30 NEVER fired (avg_esc=0) — chains degrade
+// by model-fallback, not tier-escalation, so mid rungs were dead weight. Market
+// evidence: normal-weather min asks are ali/glm-5.3 $0.044, zai/glm-5.3 $0.0044,
+// terra $0.12 (over the old ceiling!), qwen3.8-max $0.042 — $0.10 kept eating
+// real heads during ordinary blinks. Ranking is cheapest-first, so a higher
+// tier-0 changes WHO IS ELIGIBLE, not what anything costs in normal weather.
+// Deliberately EXCLUDED: kimi-k3 storm asks ($0.525+) — above kimi's own $0.30
+// list price, a bad deal on its own merits, not a budget trade.
+export const DEFAULT_BUDGET_LADDER = [0.50, Infinity];
 
 /**
  * Resolves candidates for a specific price ceiling tier.
@@ -167,7 +176,7 @@ function rankOrderedBudgetCascade({
   const chain = startIdx > 0 ? resolved.slice(startIdx) : resolved;
 
   const ladder = maxFallbackPrice !== null
-    ? [maxFallbackPrice, ...[0.20, 0.30, Infinity].filter(p => p > maxFallbackPrice)]
+    ? [maxFallbackPrice, Infinity]
     : DEFAULT_BUDGET_LADDER;
 
   for (let level = 0; level < ladder.length; level++) {

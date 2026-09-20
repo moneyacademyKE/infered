@@ -209,7 +209,7 @@
       (is (= "cx/gpt-5.6-terra" (:pinnedPick res))))))
 
 (deftest test-elastic-budget-escalation-ladder
-  (testing "Escalates budget ceiling from $0.10 -> $0.20 -> $0.30 -> zero-downtime fallback when output prices rise"
+  (testing "Two-rung ladder: $0.50 tier-0, then any-verified-ask fallback — escalates when prices rise, never fails"
     (let [res (run-node-eval
                "import { rankCandidates } from './src/router/pareto.js';
                 import { createPriceCache, updateSpotPrices } from './src/router/pricing.js';
@@ -217,51 +217,32 @@
 
                 const metricsStore = createMetricsStore();
 
-                // Case 1: Models available at <= $0.10
+                // Case 1: Models available at <= $0.50 (normal weather)
                 const cache1 = createPriceCache([]);
                 updateSpotPrices(cache1, [
                   { providerId: 'p1', modelId: 'zai/glm-5.3-flash', prompt: 0.05, completion: 0.08 }
                 ]);
                 const res1 = rankCandidates({ model: 'infered/glm-budget', priceCache: cache1, metricsStore });
 
-                // Case 2: Output prices surge to $0.15 (0 models <= $0.10, but available <= $0.20)
+                // Case 2: Output price surges to $0.65 (over tier-0 $0.50 -> unconstrained fallback tier)
                 const cache2 = createPriceCache([]);
                 updateSpotPrices(cache2, [
-                  { providerId: 'p2', modelId: 'zai/glm-5.3-flash', prompt: 0.10, completion: 0.15 }
+                  { providerId: 'p2', modelId: 'zai/glm-5.3-flash', prompt: 0.10, completion: 0.65 }
                 ]);
                 const res2 = rankCandidates({ model: 'infered/glm-budget', priceCache: cache2, metricsStore });
 
-                // Case 3: Output prices surge to $0.25 (0 models <= $0.20, but available <= $0.30)
-                const cache3 = createPriceCache([]);
-                updateSpotPrices(cache3, [
-                  { providerId: 'p3', modelId: 'zai/glm-5.3-flash', prompt: 0.15, completion: 0.25 }
-                ]);
-                const res3 = rankCandidates({ model: 'infered/glm-budget', priceCache: cache3, metricsStore });
-
-                // Case 4: Output prices surge to $0.45 (0 models <= $0.30 -> routes to cheapest healthy for zero downtime)
-                const cache4 = createPriceCache([]);
-                updateSpotPrices(cache4, [
-                  { providerId: 'p4', modelId: 'zai/glm-5.3-flash', prompt: 0.20, completion: 0.45 }
-                ]);
-                const res4 = rankCandidates({ model: 'infered/glm-budget', priceCache: cache4, metricsStore });
-
                 console.log(JSON.stringify({
                   tier1: res1[0]?.budgetTier,
-                  tier2: res2[0]?.budgetTier,
-                  tier3: res3[0]?.budgetTier,
-                  tier4: res4[0]?.budgetTier,
                   tier1Escalation: res1[0]?.escalationLevel,
+                  tier2Tier: res2[0]?.budgetTier,
                   tier2Escalation: res2[0]?.escalationLevel,
-                  tier3Escalation: res3[0]?.escalationLevel,
-                  tier4ZeroDowntimeSuccess: res4.length > 0
+                  tier2Served: res2.length > 0
                 }));")]
-      (is (== 0.10 (:tier1 res)))
-      (is (== 0.20 (:tier2 res)))
-      (is (== 0.30 (:tier3 res)))
+      (is (== 0.50 (:tier1 res)))
       (is (= 0 (:tier1Escalation res)))
+      (is (= "unconstrained-fallback" (:tier2Tier res)))
       (is (= 1 (:tier2Escalation res)))
-      (is (= 2 (:tier3Escalation res)))
-      (is (:tier4ZeroDowntimeSuccess res)))))
+      (is (:tier2Served res) "over-budget prices escalate a tier instead of failing"))))
 
 (deftest test-glm-budget-cascade-behavior
   (testing "glm-budget routes as a budget cascade over the sol-free chain; sol-budget is the same chain now"
@@ -292,13 +273,13 @@
                   solWinner: solRanked[0] && solRanked[0].modelId
                 }));")]
       (is (= "zai/glm-5.3-flash" (:glmWinner res))
-          "cheapest chain position under the $0.10 ceiling wins")
+          "cheapest chain position under the $0.50 tier-0 ceiling wins")
       (is (not-any? #(= "cx/gpt-5.6-sol" %) (:glmChain res))
           "sol must never appear in glm-budget candidates, even with a cheap spot ask")
       (is (= "zai/glm-5.3-flash" (:solWinner res))
           "sol-budget resolves to the same sol-free chain — cheap sol asks stay invisible")
-      (is (= ["zai/glm-5.3-flash" "zai/glm-5.3"] (:glmChain res))
-          "kimi (0.12) and terra (0.20) are over the $0.10 ceiling")
+      (is (= ["zai/glm-5.3-flash" "zai/glm-5.3" "ali/kimi-k3" "cx/gpt-5.6-terra"] (:glmChain res))
+          "full chain ordered cheapest-first — kimi (0.12) and terra (0.20) are tier-0 eligible under $0.50")
       (is (= 0 (:glmEscalation res)))
       (is (:glmIsCascade res) "must take the ordered budget-cascade path"))))
 
@@ -339,8 +320,8 @@
           "unquoted head is skipped; next chain position carries traffic")
       (is (not-any? #(= "cx/gpt-6-astra" %) (:deferredChain res))
           "astra must not appear as a candidate without verified spot asks")
-      (is (= ["zai/glm-5.3-flash"] (:deferredChain res))
-          "kimi (0.12 completion) is over the $0.10 ceiling at tier 0")
+      (is (= ["zai/glm-5.3-flash" "ali/kimi-k3"] (:deferredChain res))
+          "kimi (0.12) is tier-0 eligible under the $0.50 ceiling; only the unquoted astra is deferred")
       (is (:deferredIsCascade res) "must take the ordered budget-cascade path")
       (is (= "cx/gpt-6-astra" (:promotedWinner res))
           "once the market lists astra, it becomes the head even OVER the ceiling (price-exempt)"))))

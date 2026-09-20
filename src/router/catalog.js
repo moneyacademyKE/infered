@@ -31,7 +31,7 @@ export const OFFICIAL_PRICES = {
 // Budget cascade ordering (sol removed 2026-09-05 per owner directive —
 // upstream no_capacity made it a liability). ali/glm-5.3 leads since
 // 2026-09-15 (owner directive): verified quotable on InferHub with min spot
-// ask $0.0352/M output — under the $0.10 ceiling, so the head truly serves.
+// ask $0.0352/M output — under the $0.50 tier-0 ceiling, so the head truly serves.
 export const GLM_BUDGET_FALLBACK_CHAIN = [
   "ali/glm-5.3",
   "zai/glm-5.3-flash",
