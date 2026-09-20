@@ -244,3 +244,195 @@
       (is (false? (:hasProviderHeader res))
           "X-InferHub-Provider must NOT be sent when providerId is 'official'"))))
 
+(deftest test-stream-failover-before-first-content
+  (testing "Upstream stream that ends before any content token fails over to the next candidate"
+    (let [res (run-node-eval
+               "import { executeWithFallback } from './src/router/client.js';
+                import { createMetricsStore, getProviderStats } from './src/router/metrics.js';
+
+                const metricsStore = createMetricsStore();
+
+                // Reasoning model that streams role + reasoning frames then dies (no content, no DONE)
+                const deadStreamFetch = async (url, opts) => {
+                  if (opts.headers['X-InferHub-Provider'] === 'reasoning-node') {
+                    return new Response(new ReadableStream({
+                      start(c) {
+                        const enc = new TextEncoder();
+                        c.enqueue(enc.encode('data: ' + JSON.stringify({ choices: [{ delta: { content: '', role: 'assistant', reasoning_content: '' } }] }) + '\\n\\n'));
+                        c.enqueue(enc.encode('data: ' + JSON.stringify({ choices: [{ delta: { reasoning_content: 'thinking...' } }] }) + '\\n\\n'));
+                        c.close(); // EOF before any content — the dropped-stream disease
+                      }
+                    }), { status: 200, headers: { 'Content-Type': 'text/event-stream' } });
+                  }
+                  return new Response(JSON.stringify({
+                    choices: [{ message: { role: 'assistant', content: 'served by flash' }, finish_reason: 'stop' }]
+                  }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+                };
+
+                const result = await executeWithFallback({
+                  candidates: [
+                    { providerId: 'reasoning-node', modelId: 'ali/glm-5.3', savingsPct: 97, blendedPrice: 0.05 },
+                    { providerId: 'flash-node', modelId: 'zai/glm-5.3-flash', savingsPct: 99, blendedPrice: 0.01 }
+                  ],
+                  requestBody: { stream: true, messages: [{ role: 'user', content: 'hi' }] },
+                  apiKey: 'test-key',
+                  metricsStore,
+                  fetchFn: deadStreamFetch
+                });
+
+                console.log(JSON.stringify({
+                  success: result.success,
+                  selectedProvider: result.selectedCandidate?.providerId,
+                  attempts: result.attempts,
+                  firstError: result.failoverErrors?.[0]?.error,
+                  reasoningNodeFailed: getProviderStats(metricsStore, 'reasoning-node', 'ali/glm-5.3').failedRequests
+                }));")]
+      (is (:success res))
+      (is (= "flash-node" (:selectedProvider res))
+          "stream that dies before first content must fail over to next candidate")
+      (is (= 2 (:attempts res)))
+      (is (re-find #"before producing any content|stream ended" (str (:firstError res))))
+      (is (= 1 (:reasoningNodeFailed res)) "the dead stream must be recorded as a candidate failure"))))
+
+(deftest test-stream-prefix-replay-preserves-frames
+  (testing "Buffered prefix (role + reasoning frames) is replayed before remaining stream"
+    (let [res (run-node-eval
+               "import { executeWithFallback } from './src/router/client.js';
+
+                const enc = new TextEncoder();
+                const sseFrame = (delta) => 'data: ' + JSON.stringify({ choices: [{ delta }] }) + '\\n\\n';
+
+                const fetchFn = async () => new Response(new ReadableStream({
+                  start(c) {
+                    c.enqueue(enc.encode(sseFrame({ content: '', role: 'assistant', reasoning_content: '' })));
+                    c.enqueue(enc.encode(sseFrame({ reasoning_content: ' pondering' })));
+                    c.enqueue(enc.encode(sseFrame({ content: 'He' })));
+                    c.enqueue(enc.encode(sseFrame({ content: 'llo' })));
+                    c.enqueue(enc.encode('data: [DONE]\\n\\n'));
+                    c.close();
+                  }
+                }), { status: 200, headers: { 'Content-Type': 'text/event-stream' } });
+
+                const result = await executeWithFallback({
+                  candidates: [{ providerId: 'n1', modelId: 'ali/glm-5.3', savingsPct: 97, blendedPrice: 0.05 }],
+                  requestBody: { stream: true, messages: [{ role: 'user', content: 'hi' }] },
+                  apiKey: 'test-key',
+                  metricsStore: (await import('./src/router/metrics.js')).createMetricsStore(),
+                  fetchFn
+                });
+
+                let received = '';
+                const reader = result.stream.getReader();
+                const dec = new TextDecoder();
+                for (;;) {
+                  const { done, value } = await reader.read();
+                  if (done) break;
+                  received += dec.decode(value, { stream: true });
+                }
+
+                console.log(JSON.stringify({
+                  success: result.success,
+                  hasRoleFrame: received.includes('\"role\":\"assistant\"'),
+                  hasReasoning: received.includes('pondering'),
+                  hasHello: received.includes('\"content\":\"He\"') && received.includes('\"content\":\"llo\"'),
+                  hasDone: received.includes('[DONE]'),
+                  orderOk: received.indexOf('pondering') < received.indexOf('\"content\":\"He\"') && received.indexOf('\"content\":\"He\"') < received.indexOf('[DONE]')
+                }));")]
+      (is (:success res))
+      (is (:hasRoleFrame res) "role frame must be replayed")
+      (is (:hasReasoning res) "reasoning frames must be replayed")
+      (is (:hasHello res) "content frames must appear exactly once (not duplicated between buffer and stream)")
+      (is (:hasDone res) "[DONE] sentinel must pass through")
+      (is (:orderOk res) "frame order must be preserved"))))
+
+(deftest test-mid-stream-death-reports-outcome
+  (testing "Stream dying after content is committed reports via onStreamOutcome, not silently"
+    (let [res (run-node-eval
+               "import { executeWithFallback } from './src/router/client.js';
+                import { createMetricsStore } from './src/router/metrics.js';
+
+                const metricsStore = createMetricsStore();
+                const outcomes = [];
+                const enc = new TextEncoder();
+                const sseFrame = (delta) => 'data: ' + JSON.stringify({ choices: [{ delta }] }) + '\\n\\n';
+
+                const fetchFn = async () => new Response(new ReadableStream({
+                  start(c) {
+                    c.enqueue(enc.encode(sseFrame({ content: '', role: 'assistant' })));
+                    // Real streams have wall-clock gaps: content lands, THEN the
+                    // connection dies (error() would otherwise discard the queue).
+                    setTimeout(() => c.enqueue(enc.encode(sseFrame({ content: 'partial' }))), 15);
+                    setTimeout(() => c.error(new Error('upstream connection reset')), 40);
+                  }
+                }), { status: 200, headers: { 'Content-Type': 'text/event-stream' } });
+
+                const result = await executeWithFallback({
+                  candidates: [{ providerId: 'n1', modelId: 'm1', savingsPct: 10, blendedPrice: 0.1 }],
+                  requestBody: { stream: true, messages: [{ role: 'user', content: 'hi' }] },
+                  apiKey: 'test-key',
+                  metricsStore,
+                  fetchFn,
+                  onStreamOutcome: (o) => outcomes.push(o)
+                });
+
+                // Drain the stream so the pump runs to its error
+                const reader = result.stream.getReader();
+                try { for (;;) { const { done } = await reader.read(); if (done) break; } } catch (e) {}
+
+                await new Promise((r) => setTimeout(r, 30));
+
+                console.log(JSON.stringify({
+                  success: result.success,
+                  outcomeCount: outcomes.length,
+                  firstOutcome: outcomes[0] ? { ok: outcomes[0].ok, error: outcomes[0].error } : null
+                }));")]
+      (is (:success res) "committed stream still reports success at selection time")
+      (is (= 1 (:outcomeCount res)) "exactly one stream outcome reported")
+      (is (= "upstream_stream_died" (get-in res [:firstOutcome :error]))
+          "mid-stream upstream death must be visible, not swallowed"))))
+
+(deftest test-client-abort-during-precontent-buffer
+  (testing "Client disconnect while waiting for first content aborts cleanly with 499"
+    (let [res (run-node-eval
+               "import { executeWithFallback } from './src/router/client.js';
+                import { createMetricsStore } from './src/router/metrics.js';
+
+                const metricsStore = createMetricsStore();
+                const ac = new AbortController();
+                const enc = new TextEncoder();
+
+                // Streams one reasoning frame then hangs until the abort tears it down
+                const hangingStreamFetch = (url, opts) => new Promise((resolve) => {
+                  setTimeout(() => {
+                    resolve(new Response(new ReadableStream({
+                      start(c) {
+                        c.enqueue(enc.encode('data: ' + JSON.stringify({ choices: [{ delta: { reasoning_content: '...' } }] }) + '\\n\\n'));
+                        opts.signal.addEventListener('abort', () => {
+                          try { c.error(new Error('connection torn down by client abort')); } catch {}
+                        });
+                      }
+                    }), { status: 200, headers: { 'Content-Type': 'text/event-stream' } }));
+                  }, 10);
+                });
+
+                setTimeout(() => ac.abort(), 80);
+
+                const result = await executeWithFallback({
+                  candidates: [{ providerId: 'n1', modelId: 'm1', savingsPct: 10, blendedPrice: 0.1 }],
+                  requestBody: { stream: true, messages: [{ role: 'user', content: 'hi' }] },
+                  apiKey: 'test-key',
+                  metricsStore,
+                  fetchFn: hangingStreamFetch,
+                  requestSignal: ac.signal,
+                  firstContentTimeoutMs: 5000
+                });
+
+                console.log(JSON.stringify({
+                  success: result.success,
+                  status: result.status,
+                  error: result.error
+                }));")]
+      (is (false? (:success res)))
+      (is (= 499 (:status res)))
+      (is (re-find #"Client disconnected" (str (:error res)))))))
+

@@ -1,6 +1,6 @@
 /** Infered — dynamic virtual LLM router for the InferHub spot marketplace. */
 
-import { VIRTUAL_ALIASES, GLM_BUDGET_FALLBACK_CHAIN, ASTRA_BUDGET_FALLBACK_CHAIN, resolveStrongLink } from "./router/catalog.js";
+import { VIRTUAL_ALIASES, CASCADE_CHAINS, resolveStrongLink } from "./router/catalog.js";
 import { createPriceCache, updateSpotPrices, calculateSavingsPct, ingestInferHubModelsResponse, buildRatecard, getQuotesForModel } from "./router/pricing.js";
 import { createMetricsStore, getProviderStats, getUsageSummary } from "./router/metrics.js";
 import { createCacheStore, computeRequestKey, getCachedResponse, putCachedResponse } from "./router/cache.js";
@@ -146,7 +146,7 @@ export default {
         cachedQuotes: Object.keys(priceCache.quotes).length,
         marketModels: Object.keys(priceCache.modelToProviders).sort(),
         lastSyncRaw: priceCache.lastSyncRaw || null,
-        chainAsks: [...new Set([...GLM_BUDGET_FALLBACK_CHAIN, ...ASTRA_BUDGET_FALLBACK_CHAIN])]
+        chainAsks: [...new Set(Object.values(CASCADE_CHAINS).flat())]
           .reduce((acc, m) => {
             acc[m] = getQuotesForModel(priceCache, m).filter(q => q.priceSource === "spot").length;
             return acc;
@@ -261,6 +261,10 @@ export default {
 
         // 3. Candidate ranking with chain fallback and strict output token budget ceiling
         const fetchFn = (apiKey && apiKey !== "test-key") ? fetch : createStandaloneMockFetch();
+        // Stream deaths are reported asynchronously after a candidate is chosen;
+        // reportStreamOutcome late-binds to the recorder once it exists.
+        let pendingStreamOutcome = null;
+        let reportStreamOutcome = null;
         const rank = (m) => rankCandidates({
           model: m,
           priceCache,
@@ -283,7 +287,11 @@ export default {
             metricsStore,
             fetchFn,
             baseUrl,
-            requestSignal: request.signal
+            requestSignal: request.signal,
+            onStreamOutcome: (o) => {
+              if (reportStreamOutcome) reportStreamOutcome(o);
+              else pendingStreamOutcome = o;
+            }
           });
         };
 
@@ -363,12 +371,16 @@ export default {
         if (result.getMetrics && result.stream) {
           const getMetrics = result.getMetrics;
           let recorded = false;
-          // Exactly one row per stream: flush on success, cancel on disconnect.
+          // Exactly one row per stream: flush on success, cancel on disconnect,
+          // outcome hook on upstream death — whichever arrives first wins.
           const recordOnce = (m, overrides) => {
             if (recorded) return;
             recorded = true;
             recordDecision(m || {}, overrides);
           };
+          const recordStreamDeath = (o) => recordOnce(o && o.metrics, { ok: false, error: (o && o.error) || "upstream_stream_died" });
+          if (pendingStreamOutcome) recordStreamDeath(pendingStreamOutcome);
+          reportStreamOutcome = recordStreamDeath;
           const ts = new TransformStream({
             flush() { recordOnce(getMetrics()); },
             cancel() { recordOnce(null, { ok: false, error: "client_disconnected" }); }
