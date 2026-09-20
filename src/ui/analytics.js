@@ -50,21 +50,45 @@ const CHAINS_SQL = `
   ORDER BY reqs DESC
   LIMIT 8`;
 
+// Failure ledger: the classes 3cb11ce made visible (upstream_stream_died,
+// client_disconnected) plus every legacy failure row. Classes are 24h-scoped
+// so the checklist verdict reflects current health; recent rows are all-time.
+const FAILURES_24H_SQL = `
+  SELECT COALESCE(error, 'unrecorded') AS err, COUNT(*) AS n
+  FROM routing_decisions
+  WHERE ok = 0 AND ts >= datetime('now', '-1 day')
+  GROUP BY error
+  ORDER BY n DESC`;
+
+const RECENT_FAILURES_SQL = `
+  SELECT ts, requested_model AS chain, selected_model AS model,
+         COALESCE(error, 'unrecorded') AS error
+  FROM routing_decisions
+  WHERE ok = 0
+  ORDER BY ts DESC
+  LIMIT 8`;
+
 export async function collectAnalytics(db) {
-  const [top, switching, flapping, health, chains] = await db.batch([
+  const [top, switching, flapping, health, chains, failures, recentFailures] = await db.batch([
     db.prepare(TOP_MODELS_SQL),
     db.prepare(SWITCHING_SQL),
     db.prepare(FLAPPING_SQL),
     db.prepare(HEALTH_SQL),
-    db.prepare(CHAINS_SQL)
+    db.prepare(CHAINS_SQL),
+    db.prepare(FAILURES_24H_SQL),
+    db.prepare(RECENT_FAILURES_SQL)
   ]);
+  const failureClasses = failures.results || [];
   return {
     topModels: top.results || [],
     switching: (switching.results || [])[0] || {},
     flappingSessions: (flapping.results || [])[0]?.sessions || 0,
     totalSessions: (health.results || [])[0]?.sessions || 0,
     last24h: (health.results || [])[0]?.last24h || 0,
-    chains: chains.results || []
+    chains: chains.results || [],
+    failureClasses,
+    failures24h: failureClasses.reduce((a, c) => a + (c.n || 0), 0),
+    recentFailures: recentFailures.results || []
   };
 }
 
@@ -118,6 +142,15 @@ ${modelRows}
 <div class="item">↻ silent failovers absorbed: <span class="num">${s.failovers || 0}</span></div>
 <div class="item">▲ budget escalations fired: <span class="num">${s.escalations || 0}</span></div>
 <div class="item">✗ total failures recorded: <span class="num">${s.errors || 0}</span></div>
+
+<h2>Failure ledger</h2>
+<div class="item">${check((d.failures24h || 0) === 0)} failures in last 24h: <span class="num">${d.failures24h || 0}</span></div>
+${(d.failureClasses || []).map(c =>
+    `<div class="item muted">↳ ${c.err}: <span class="num">${c.n}</span></div>`).join("")}
+${(d.recentFailures || []).length
+    ? d.recentFailures.map(f =>
+        `<div class="item bad">✗ ${f.ts} · ${f.chain || "?"} → ${f.model || "?"} · ${f.error || "unrecorded"}</div>`).join("")
+    : `<div class="item muted">no failure rows in the ledger</div>`}
 
 <h2>Session stickiness</h2>
 <div class="item">${check(stable)} sessions that changed model mid-flight: <span class="num">${d.flappingSessions}</span></div>

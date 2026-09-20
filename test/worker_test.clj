@@ -106,6 +106,8 @@
                   homeHasRatecardRow: homeHtml.includes('gpt-5.6-terra'),
                   homeHasNoSol: !homeHtml.includes('gpt-5.6-sol'),
                   homeHasDollar: homeHtml.includes('$'),
+                  homeHasFailureLedger: homeHtml.includes('Failure ledger'),
+                  homeHasCleanLedger: homeHtml.includes('no failure rows in the ledger'),
                   legacyStatus: legacyRes.status,
                   legacyLocation: legacyRes.headers.get('location') || ''
                 }));")]
@@ -115,6 +117,8 @@
       (is (true? (:homeHasRatecardRow res)) "prices section should list ratecard models")
       (is (true? (:homeHasNoSol res)) "removed sol must not render anywhere on the homepage")
       (is (true? (:homeHasDollar res)) "prices rows should carry $ figures")
+      (is (true? (:homeHasFailureLedger res)) "/ should render the Failure ledger section")
+      (is (true? (:homeHasCleanLedger res)) "empty ledger renders the clean placeholder")
       (is (= 302 (:legacyStatus res)) "/dashboard redirects after retirement")
       (is (str/ends-with? (str (:legacyLocation res)) "/") "redirect targets the analytics homepage"))))
 

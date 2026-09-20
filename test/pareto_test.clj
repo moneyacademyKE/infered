@@ -143,6 +143,52 @@
       (is (:noOfficialPricedCandidates res))
       (is (>= (:officialFallbackSkips res) 1)))))
 
+(deftest test-official-last-resort-serves-counted
+  (testing "Official list prices are admissible only when the last-resort rung fires (nothing passed the bounded rung), and every such serve is counted"
+    (let [res (run-node-eval
+               "import { rankCandidates } from './src/router/pareto.js';
+                import { createPriceCache, updateSpotPrices } from './src/router/pricing.js';
+                import { createMetricsStore } from './src/router/metrics.js';
+
+                // Book where the only ask is ABOVE every bounded rung: the bounded
+                // tier yields zero candidates, forcing the Infinity last-resort rung.
+                const makeExpensiveCache = () => {
+                  const cache = createPriceCache([]);
+                  updateSpotPrices(cache, [
+                    { providerId: 'pricey-node-1', modelId: 'zai/glm-5.3-flash', prompt: 0.30, completion: 0.80 }
+                  ]);
+                  return cache;
+                };
+                const makeCheapCache = () => {
+                  const cache = createPriceCache([]);
+                  updateSpotPrices(cache, [
+                    { providerId: 'flash-node-1', modelId: 'zai/glm-5.3-flash', prompt: 0.01, completion: 0.04 }
+                  ]);
+                  return cache;
+                };
+
+                // Uncapped ladder [0.50, Infinity]: 0.50 rung yields nothing (only
+                // $0.80 ask, officials skipped) -> Infinity rung admits officials.
+                const uncappedStore = createMetricsStore();
+                const uncapped = rankCandidates({ model: 'infered/glm-budget', priceCache: makeExpensiveCache(), metricsStore: uncappedStore });
+
+                // Capped ladder [0.10, Infinity] but a $0.04 ask satisfies the
+                // bounded rung -> loop stops -> Infinity never runs -> no officials.
+                const cappedStore = createMetricsStore();
+                const capped = rankCandidates({ model: 'infered/glm-budget', priceCache: makeCheapCache(), metricsStore: cappedStore, maxFallbackPrice: 0.10 });
+
+                console.log(JSON.stringify({
+                  uncappedCount: uncapped.length,
+                  officialServed: uncapped.filter(c => c.quote.priceSource === 'official').length,
+                  uncappedCounter: uncappedStore.usage.officialLastResortServes || 0,
+                  cappedOfficialCount: capped.filter(c => c.quote.priceSource === 'official').length,
+                  cappedCounter: cappedStore.usage.officialLastResortServes || 0
+                }));")]
+      (is (>= (:officialServed res) 3) "unquoted chain models admissible at the Infinity rung")
+      (is (>= (:uncappedCounter res) 3) "every official serve at the last-resort rung is counted")
+      (is (= 0 (:cappedOfficialCount res)) "a satisfied bounded rung admits no official-priced candidates")
+      (is (= 0 (:cappedCounter res)) "bounded rungs never count official serves"))))
+
 (deftest test-nan-quotes-never-budget-eligible
   (testing "NaN/malformed asks are unpriceable and can never pass the budget ceiling (H3)"
     (let [res (run-node-eval

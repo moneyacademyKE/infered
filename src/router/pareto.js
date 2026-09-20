@@ -82,6 +82,12 @@ function evaluateCascadeTier({
         if (!priceExempt && outputTokenPrice > ceiling) {
           continue;
         }
+      } else if (quote.priceSource === "official") {
+        // Unconstrained last-resort tier: list prices are admissible by design
+        // (zero-downtime when the whole book is above cap). Count every serve
+        // so paying list stays a visible trade, never a silent one.
+        metricsStore.usage.officialLastResortServes =
+          (metricsStore.usage.officialLastResortServes || 0) + 1;
       }
 
       let priorityScore = (chain.length - i) * 10.0;

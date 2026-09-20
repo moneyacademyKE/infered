@@ -62,7 +62,11 @@ export async function recordRoutingAnalytics(env, rec) {
       rec.ok ? 1 : 0,
       rec.error ?? null
     ).run();
-  } catch {}
+  } catch (e) {
+    // Never throw — observability must not break routing — but never be
+    // SILENT either: a dead D1 write is ledger blindness (Sep 5-19 proved it).
+    console.error("routing-analytics: D1 write failed:", e?.message || e);
+  }
 }
 
 export function createStandaloneMockFetch() {
