@@ -288,9 +288,203 @@
 
                 console.log(JSON.stringify({
                   success: result.success,
+                  hasSyntheticError: received.includes('all candidates exhausted before content'),
                   hasDone: received.includes('[DONE]'),
                   outcomeError: outcomes[0] ? outcomes[0].error : null
                 }));")]
-      (is (:success res))
-      (is (:hasDone res) "the sentinel is relayed — the protocol completed honestly")
-      (is (= "empty_completion" (:outcomeError res)) "but an empty answer is recorded as a failure, never ok=1"))))
+      (is (:success res) "committed at the first role byte")
+      (is (:hasSyntheticError res) "empty [DONE] is withheld and exhausted cleanly in-band — never relayed as a hollow completion")
+      (is (:hasDone res) "the client still gets a proper terminator")
+      (is (= "all_candidates_exhausted_pre_content" (:outcomeError res))
+          "an empty answer is a candidate failure the ledger names — never ok=1"))))
+
+(deftest test-empty-done-splices-to-next-candidate
+  (testing "Upstream [DONE] with zero content is a corpse: withhold it, splice the next candidate"
+    (let [res (run-node-eval
+               "import { executeWithFallback } from './src/router/client.js';
+                import { createMetricsStore } from './src/router/metrics.js';
+
+                const metricsStore = createMetricsStore();
+                const enc = new TextEncoder();
+                const sseFrame = (delta) => 'data: ' + JSON.stringify({ choices: [{ delta }] }) + '\\n\\n';
+
+                let call = 0;
+                const fetchFn = async () => {
+                  call++;
+                  if (call === 1) {
+                    // The flash disease: role + reasoning, then [DONE] with ZERO content
+                    return new Response(new ReadableStream({
+                      start(c) {
+                        c.enqueue(enc.encode(sseFrame({ content: '', role: 'assistant' })));
+                        c.enqueue(enc.encode(sseFrame({ reasoning_content: 'half-thought' })));
+                        c.enqueue(enc.encode('data: [DONE]\\n\\n'));
+                        c.close();
+                      }
+                    }), { status: 200, headers: { 'Content-Type': 'text/event-stream' } });
+                  }
+                  return new Response(new ReadableStream({
+                    start(c) {
+                      c.enqueue(enc.encode(sseFrame({ content: '', role: 'assistant' })));
+                      c.enqueue(enc.encode(sseFrame({ content: 'He' })));
+                      c.enqueue(enc.encode(sseFrame({ content: 'llo' })));
+                      c.enqueue(enc.encode('data: [DONE]\\n\\n'));
+                      c.close();
+                    }
+                  }), { status: 200, headers: { 'Content-Type': 'text/event-stream' } });
+                };
+
+                const result = await executeWithFallback({
+                  candidates: [
+                    { providerId: 'corpse-node', modelId: 'zai/glm-5.3-flash', savingsPct: 98, blendedPrice: 0.04 },
+                    { providerId: 'healthy-node', modelId: 'zai/glm-5.3', savingsPct: 95, blendedPrice: 0.06 }
+                  ],
+                  requestBody: { stream: true, messages: [{ role: 'user', content: 'hi' }] },
+                  apiKey: 'test-key',
+                  metricsStore,
+                  fetchFn
+                });
+
+                let received = '';
+                const reader = result.stream.getReader();
+                const dec = new TextDecoder();
+                for (;;) { const { done, value } = await reader.read(); if (done) break; received += dec.decode(value, { stream: true }); }
+
+                console.log(JSON.stringify({
+                  success: result.success,
+                  attempts: result.attempts,
+                  servedBy: result.selectedCandidate?.providerId,
+                  hasHello: received.includes('\"content\":\"He\"') && received.includes('\"content\":\"llo\"'),
+                  hasReasoning: received.includes('half-thought'),
+                  hasDone: received.includes('[DONE]'),
+                  firstError: result.failoverErrors?.[0]?.error,
+                  splices: metricsStore.usage.streamSplices || 0,
+                  preContentFailures: metricsStore.usage.preContentFailures || 0
+                }));")]
+      (is (:success res) "splice landed — selection succeeds")
+      (is (= 2 (:attempts res)) "the corpse must not terminate the candidate loop")
+      (is (= "healthy-node" (:servedBy res)) "the second candidate owns the answer")
+      (is (:hasHello res) "the client receives real content, never the empty corpse")
+      (is (:hasReasoning res) "corpse reasoning bytes already relayed stay (additive)")
+      (is (:hasDone res) "exactly one [DONE] — the healthy one — terminates the stream")
+      (is (= "empty_completion" (:firstError res)) "the corpse is labeled by its class")
+      (is (= 1 (:splices res)) "the splice is counted"))))
+
+(deftest test-all-empty-done-exhausts-in-band
+  (testing "Every candidate serving an empty [DONE] ends in a clean in-band error, not an empty corpse"
+    (let [res (run-node-eval
+               "import { executeWithFallback } from './src/router/client.js';
+                import { createMetricsStore } from './src/router/metrics.js';
+
+                const metricsStore = createMetricsStore();
+                const outcomes = [];
+                const enc = new TextEncoder();
+                const sseFrame = (delta) => 'data: ' + JSON.stringify({ choices: [{ delta }] }) + '\\n\\n';
+
+                const corpse = () => new Response(new ReadableStream({
+                  start(c) {
+                    c.enqueue(enc.encode(sseFrame({ content: '', role: 'assistant' })));
+                    c.enqueue(enc.encode(sseFrame({ reasoning_content: 'half-thought' })));
+                    c.enqueue(enc.encode('data: [DONE]\\n\\n'));
+                    c.close();
+                  }
+                }), { status: 200, headers: { 'Content-Type': 'text/event-stream' } });
+
+                const fetchFn = async () => corpse();
+
+                const result = await executeWithFallback({
+                  candidates: [
+                    { providerId: 'corpse-a', modelId: 'zai/glm-5.3-flash', savingsPct: 98, blendedPrice: 0.04 },
+                    { providerId: 'corpse-b', modelId: 'zai/glm-5.3-flash', savingsPct: 98, blendedPrice: 0.04 }
+                  ],
+                  requestBody: { stream: true, messages: [{ role: 'user', content: 'hi' }] },
+                  apiKey: 'test-key',
+                  metricsStore,
+                  fetchFn,
+                  onStreamOutcome: (o) => outcomes.push(o)
+                });
+
+                let received = '';
+                const reader = result.stream.getReader();
+                const dec = new TextDecoder();
+                try { for (;;) { const { done, value } = await reader.read(); if (done) break; received += dec.decode(value, { stream: true }); } } catch (e) {}
+                await new Promise((r) => setTimeout(r, 30));
+
+                console.log(JSON.stringify({
+                  success: result.success,
+                  attempts: result.attempts,
+                  hasCleanError: received.includes('all candidates exhausted before content'),
+                  hasDone: received.includes('[DONE]'),
+                  errors: (result.failoverErrors || []).map((e) => e.error),
+                  firstOutcome: outcomes[0] ? { ok: outcomes[0].ok, error: outcomes[0].error } : null
+                }));")]
+      (is (:success res) "committed at first byte")
+      (is (= 2 (:attempts res)) "BOTH corpses are tried — an empty [DONE] never ends the loop early")
+      (is (:hasCleanError res) "client gets a clean in-band provider error, never an empty corpse")
+      (is (:hasDone res) "and a proper [DONE] terminator")
+      (is (= ["empty_completion" "empty_completion"] (:errors res)))
+      (is (= "all_candidates_exhausted_pre_content" (get-in res [:firstOutcome :error]))
+          "exhaustion lands in the ledger"))))
+
+(deftest test-hard-death-pre-content-splices
+  (testing "Connection reset mid-reasoning (pre-content) with a second candidate available splices"
+    (let [res (run-node-eval
+               "import { executeWithFallback } from './src/router/client.js';
+                import { createMetricsStore } from './src/router/metrics.js';
+
+                const metricsStore = createMetricsStore();
+                const enc = new TextEncoder();
+                const sseFrame = (delta) => 'data: ' + JSON.stringify({ choices: [{ delta }] }) + '\\n\\n';
+
+                let call = 0;
+                const fetchFn = async () => {
+                  call++;
+                  if (call === 1) {
+                    // Hard death: reasoning streams, then the connection resets mid-flight
+                    return new Response(new ReadableStream({
+                      start(c) {
+                        c.enqueue(enc.encode(sseFrame({ content: '', role: 'assistant', reasoning_content: '' })));
+                        c.enqueue(enc.encode(sseFrame({ reasoning_content: 'torture-reasoning' })));
+                        setTimeout(() => c.error(new Error('upstream connection reset')), 25);
+                      }
+                    }), { status: 200, headers: { 'Content-Type': 'text/event-stream' } });
+                  }
+                  return new Response(new ReadableStream({
+                    start(c) {
+                      c.enqueue(enc.encode(sseFrame({ content: 'He' })));
+                      c.enqueue(enc.encode(sseFrame({ content: 'llo' })));
+                      c.enqueue(enc.encode('data: [DONE]\\n\\n'));
+                      c.close();
+                    }
+                  }), { status: 200, headers: { 'Content-Type': 'text/event-stream' } });
+                };
+
+                const result = await executeWithFallback({
+                  candidates: [
+                    { providerId: 'dying-node', modelId: 'zai/glm-5.3-flash', savingsPct: 98, blendedPrice: 0.04 },
+                    { providerId: 'healthy-node', modelId: 'zai/glm-5.3', savingsPct: 95, blendedPrice: 0.06 }
+                  ],
+                  requestBody: { stream: true, messages: [{ role: 'user', content: 'hi' }] },
+                  apiKey: 'test-key',
+                  metricsStore,
+                  fetchFn
+                });
+
+                let received = '';
+                const reader = result.stream.getReader();
+                const dec = new TextDecoder();
+                try { for (;;) { const { done, value } = await reader.read(); if (done) break; received += dec.decode(value, { stream: true }); } } catch (e) {}
+
+                console.log(JSON.stringify({
+                  success: result.success,
+                  attempts: result.attempts,
+                  servedBy: result.selectedCandidate?.providerId,
+                  hasHello: received.includes('\"content\":\"He\"') && received.includes('\"content\":\"llo\"'),
+                  hasDone: received.includes('[DONE]'),
+                  splices: metricsStore.usage.streamSplices || 0
+                }));")]
+      (is (:success res) "splice landed")
+      (is (= 2 (:attempts res)) "the reset is a candidate failure, not a stream end")
+      (is (= "healthy-node" (:servedBy res)))
+      (is (:hasHello res) "client receives the completed answer")
+      (is (:hasDone res))
+      (is (= 1 (:splices res))))))

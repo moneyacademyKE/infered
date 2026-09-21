@@ -176,7 +176,7 @@ export function executeStreamingWithSplice({
 }) {
   const clientTs = new TransformStream();
   const writer = clientTs.writable.getWriter();
-  const decoder = new TextDecoder();
+  let decoder = new TextDecoder();
   const encoder = new TextEncoder();
   const errors = [];
   const startedAt = Date.now();
@@ -216,7 +216,13 @@ export function executeStreamingWithSplice({
       firstCommitAt = Date.now();
       settle({
         success: true, status: 200, stream: clientTs.readable,
-        selectedCandidate: served, attempts: attemptsUsed,
+        // Live getters: a splice swaps the serving candidate AFTER the gate
+        // settles, so post-drain reads (D1 attribution, tests) must see the
+        // candidate that completed the answer, not the one that committed
+        // the first byte. Response headers ship at commit and stay
+        // commit-truthful; outcome readers get outcome truth.
+        get selectedCandidate() { return served; },
+        get attempts() { return attemptsUsed; },
         failoverErrors: errors, getMetrics
       });
     }
@@ -242,7 +248,9 @@ export function executeStreamingWithSplice({
     let carry = "";
     try {
       for (const candidate of candidates) {
-        if (contentSeen || doneSeen) break;
+        // Only CONTENT is terminal. A [DONE] with zero content is a corpse
+        // handled inside relay — it must never end the candidate loop.
+        if (contentSeen) break;
         if (requestSignal && requestSignal.aborted) break;
         if (errors.length >= maxAttempts) break;
         attemptsUsed++;
@@ -270,6 +278,15 @@ export function executeStreamingWithSplice({
         if (committed && errors.length > 0) bumpUsage("streamSplices");
         heldErrorChunk = null;
         let candidateDied = false;
+        let emptyDone = false;
+        // Per-candidate parser state: the carry (and the decoder's pending
+        // byte sequence) from a DEAD candidate must not leak into the next
+        // one — a stale carry holding "[DONE]" would classify the spliced
+        // candidate's first chunk as an empty-completion corpse and kill the
+        // splice in its first frame (found empirically: the splice opened,
+        // then instantly "died" with an error it never sent).
+        carry = "";
+        decoder = new TextDecoder();
 
         // Classify-then-relay, one chunk at a time. A pre-content in-band
         // error frame is WITHHELD (not relayed): if a splice follows, the
@@ -286,7 +303,18 @@ export function executeStreamingWithSplice({
             heldErrorChunk = chunk;
             return "dead";
           }
-          if (text.includes("[DONE]")) doneSeen = true;
+          if (text.includes("[DONE]")) {
+            // A [DONE] with ZERO content is a corpse, not a completion: the
+            // empty terminator is WITHHELD (relaying it would commit the
+            // client response to an empty answer), this candidate fails, and
+            // the next candidate's content completes the response. Only a
+            // [DONE] that FOLLOWS content terminates the protocol.
+            if (!contentSeen) {
+              emptyDone = true;
+              return "dead";
+            }
+            doneSeen = true;
+          }
           await writeChunk(chunk);
           if (errorFrame) return "poisoned";
           return doneSeen ? "finished" : "continue";
@@ -344,6 +372,7 @@ export function executeStreamingWithSplice({
         // content): a candidate failure the client never has to see.
         try { await opened.reader.cancel(); } catch {}
         bumpUsage("preContentFailures");
+        if (emptyDone) bumpUsage("emptyDoneCorpses");
         recordSample(metricsStore, candidate.providerId, candidate.modelId, {
           latencyMs: Date.now() - opened.startTime, ttftMs: Date.now() - opened.startTime,
           success: false,
@@ -351,31 +380,21 @@ export function executeStreamingWithSplice({
         });
         errors.push({
           providerId: candidate.providerId, modelId: candidate.modelId, status: 502,
-          error: candidateDied ? "stream_errored_pre_content"
-            : (doneSeen ? "empty_completion" : "stream_ended_pre_content")
+          error: emptyDone ? "empty_completion"
+            : candidateDied ? "stream_errored_pre_content" : "stream_ended_pre_content"
         });
         if (requestSignal && requestSignal.aborted) break;
       }
 
-      // Loop ended without a completed answer.
+      // Loop ended without a completed answer. (There is no empty-[DONE]
+      // branch here anymore: a zero-content [DONE] is a withheld candidate
+      // failure above, so reaching this point means candidates ran out.)
       if (requestSignal && requestSignal.aborted) {
         if (committed) {
           try { await writer.abort(new Error("client disconnected")); } catch {}
           reportFailure("client_disconnected");
         } else {
           fail(499, "Client disconnected before completion.");
-        }
-        return;
-      }
-      if (doneSeen) {
-        // [DONE] arrived with zero content: protocol completed, answer empty.
-        // Report BEFORE close — the worker's flush-on-close records ok=1 and
-        // recordOnce is first-wins; closing first would bury the failure.
-        if (committed) {
-          reportFailure("empty_completion");
-          try { await writer.close(); } catch {}
-        } else {
-          fail(502, "Upstream completed with no content tokens.");
         }
         return;
       }
