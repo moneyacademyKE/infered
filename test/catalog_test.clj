@@ -135,8 +135,8 @@
              (:astraTerra res)))
       (is (= ["cx/gpt-5.6-terra" "ali/kimi-k3" "zai/glm-5.3-flash"]
              (:terraKimi res)))
-      (is (= ["ali/kimi-k3" "zai/glm-5.3-flash" "ali/qwen3.8-max"]
-             (:kimiGlm res)) "qwen3.8-max is the verified market id for the kimi-glm tail")
+      (is (= ["ali/kimi-k3" "zai/glm-5.3-flash" "ali/qwen3.8-max-0902"]
+             (:kimiGlm res)) "the enabled -0902 snapshot is the kimi-glm tail; unsuffixed sibling is disabled upstream")
       (is (:registered res) "all three registered in CASCADE_CHAINS and VIRTUAL_ALIASES"))))
 
 (deftest test-strong-links
@@ -156,7 +156,7 @@
       (is (= "cx/gpt-6-astra" (:astraBudget res)) "the premium head IS astra-budget's strong link")
       (is (= "cx/gpt-6-astra" (:astraTerra res)))
       (is (= "ali/kimi-k3" (:terraKimi res)))
-      (is (= "ali/qwen3.8-max" (:kimiGlm res)) "the big-gun tail is kimi-glm's strong link")
+      (is (= "ali/qwen3.8-max-0902" (:kimiGlm res)) "the enabled big-gun tail is kimi-glm's strong link")
       (is (= "ali/kimi-k3" (:unknownName res)) "unrecognized names inherit the default chain's strong link")
       (is (= "ali/kimi-k3" (:empty res))))))
 

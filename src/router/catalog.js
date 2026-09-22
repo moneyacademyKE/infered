@@ -77,10 +77,13 @@ export const TERRA_KIMI_CHAIN = [
   "zai/glm-5.3-flash"
 ];
 
+// kimi-glm tail swapped 2026-09-22 (owner correction): the unsuffixed
+// ali/qwen3.8-max is disabled upstream (403 model_disabled on every node);
+// the dated -0902 snapshot is the enabled model the owner requested.
 export const KIMI_GLM_CHAIN = [
   "ali/kimi-k3",
   "zai/glm-5.3-flash",
-  "ali/qwen3.8-max"
+  "ali/qwen3.8-max-0902"
 ];
 
 // Virtual models that route as ordered budget cascades. Single source of truth —
@@ -104,15 +107,17 @@ export const DEFAULT_MODEL = "infered/glm-budget";
 // Designated strong link per chain — where X-Infered-Tier: strong starts the
 // cascade. Chains are ECONOMIC orderings (head = preferred under spot prices),
 // so the strong link is an explicit capability pick, not a position guess:
-// kimi-k3 scores highest in MODEL_TIERS (0.94); qwen3.8-max is kimi-glm's
-// big-gun tail; the astra heads are already their chains' premium play (a
-// strong start there is a graceful no-op over the full chain).
+// kimi-k3 scores highest in MODEL_TIERS (0.94); qwen3.8-max-0902 is
+// kimi-glm's big-gun tail (the enabled snapshot — its unsuffixed sibling
+// is disabled upstream, so strong must never start there); the astra
+// heads are already their chains' premium play (a strong start there is
+// a graceful no-op over the full chain).
 export const CHAIN_STRONG_LINKS = {
   "infered/glm-budget": "ali/kimi-k3",
   "infered/astra-budget": "cx/gpt-6-astra",
   "infered/astra-terra": "cx/gpt-6-astra",
   "infered/terra-kimi": "ali/kimi-k3",
-  "infered/kimi-glm": "ali/qwen3.8-max"
+  "infered/kimi-glm": "ali/qwen3.8-max-0902"
 };
 
 // Mirrors the cascade resolution rule (CASCADE_CHAINS hit, else default chain)
