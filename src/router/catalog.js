@@ -24,7 +24,8 @@ export const OFFICIAL_PRICES = {
   // ali-hosted glm-5.3 list price per the InferHub market feed (official_in/out,
   // verified 2026-09-15) — a different listing from zai-hosted glm-5.3 below.
   "ali/glm-5.3": { prompt: 1.40, completion: 4.40 },
-  "ali/qwen3.8-max": { prompt: 1.60, completion: 4.80 },
+  // Synced to the InferHub feed official_in/out 2026-09-22 (was 1.60/4.80).
+  "ali/qwen3.8-max": { prompt: 2, completion: 6 },
   // Dated qwen snapshot (owner directive 2026-09-22). List price per the
   // InferHub feed official_in/out, verified 2026-09-22.
   "ali/qwen3.8-max-0902": { prompt: 2, completion: 6 },
