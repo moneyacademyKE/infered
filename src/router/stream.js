@@ -33,6 +33,11 @@ import { getOfficialPrice } from "./catalog.js";
 
 const DEFAULT_TIMEOUT_MS = 25000;
 export const DEFAULT_FIRST_BYTE_TIMEOUT_MS = 15000;
+export const DEFAULT_PRE_COMMIT_BUDGET_MS = 30000;
+// 4xx client-error class: the failure is model- or account-level, NOT
+// node-level — every remaining candidate refuses identically, so chasing
+// them is pure silent dead time before the client's answer.
+const NON_RETRYABLE_OPEN_STATUSES = new Set([400, 401, 403, 404]);
 const MAX_FIRST_CHUNK_BYTES = 1 * 1024 * 1024;
 const CARRY_CHARS = 48;
 const CONTENT_NEEDLE = '"content":"';
@@ -172,6 +177,7 @@ export function executeStreamingWithSplice({
   candidates, requestBody, apiKey, metricsStore, fetchFn = fetch,
   baseUrl = "https://api.inferhub.dev/v1", timeoutMs = DEFAULT_TIMEOUT_MS,
   firstByteTimeoutMs = DEFAULT_FIRST_BYTE_TIMEOUT_MS, requestSignal = null,
+  preCommitBudgetMs = DEFAULT_PRE_COMMIT_BUDGET_MS,
   onStreamOutcome = null, maxAttempts = 10
 }) {
   const clientTs = new TransformStream();
@@ -184,6 +190,8 @@ export function executeStreamingWithSplice({
   let served = null;
   let firstCommitAt = null;
   let attemptsUsed = 0;
+  let budgetCut = false;
+  let nonRetryableOpen = false;
   let contentSeen = false;
   let doneSeen = false;
   let committed = false;
@@ -254,6 +262,14 @@ export function executeStreamingWithSplice({
         if (contentSeen) break;
         if (requestSignal && requestSignal.aborted) break;
         if (errors.length >= maxAttempts) break;
+        // Bound the SILENT chase: until the first relayed byte the client
+        // stares at nothing. A model whose every node fails slowly must not
+        // burn maxAttempts x per-open latency before answering — 30s covers
+        // the slowest healthy open observed (24s TTFB) plus one splice.
+        if (!firstCommitAt && Date.now() - startedAt > preCommitBudgetMs) {
+          budgetCut = true;
+          break;
+        }
         attemptsUsed++;
 
         const opened = await openUpstreamStream({
@@ -270,6 +286,10 @@ export function executeStreamingWithSplice({
             status: opened.status, error: opened.reason
           });
           if (opened.clientGone) break;
+          if (NON_RETRYABLE_OPEN_STATUSES.has(opened.status)) {
+            nonRetryableOpen = true;
+            break;
+          }
           continue;
         }
 
@@ -403,7 +423,9 @@ export function executeStreamingWithSplice({
         // Exhausted mid-splice: hand the client a clean in-band provider error
         // instead of a dropped connection. Report BEFORE the closing writes —
         // flush-on-close records ok=1 and recordOnce is first-wins.
-        reportFailure("all_candidates_exhausted_pre_content");
+        reportFailure(nonRetryableOpen ? "non_retryable_candidate_open"
+          : budgetCut ? "pre_commit_budget_exhausted"
+          : "all_candidates_exhausted_pre_content");
         if (heldErrorChunk) { try { await writeChunk(heldErrorChunk); } catch {} }
         try { await writeChunk(encoder.encode(`data: ${JSON.stringify({
           error: { code: 502, message: "all candidates exhausted before content", type: "server_error" }
@@ -411,7 +433,11 @@ export function executeStreamingWithSplice({
         try { await writeChunk(encoder.encode(DONE_FRAME)); } catch {}
         try { await writer.close(); } catch {}
       } else {
-        fail(503, errors.length >= maxAttempts
+        fail(503, nonRetryableOpen
+          ? `Non-retryable upstream rejection (${errors[errors.length - 1]?.status || "4xx"}): every node of this model refuses identically.`
+          : budgetCut
+          ? `Pre-commit budget exhausted after ${attemptsUsed} attempts in ${Date.now() - startedAt}ms of client-facing silence.`
+          : errors.length >= maxAttempts
           ? `Retry budget exhausted after ${errors.length} upstream attempts.`
           : "All candidate nodes failed or capacity exhausted.");
       }

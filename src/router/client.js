@@ -6,7 +6,7 @@
 
 import { recordSample, recordUsage } from "./metrics.js";
 import { getOfficialPrice, CHAIN_FALLBACKS } from "./catalog.js";
-import { executeStreamingWithSplice, DEFAULT_FIRST_BYTE_TIMEOUT_MS } from "./stream.js";
+import { executeStreamingWithSplice, DEFAULT_FIRST_BYTE_TIMEOUT_MS, DEFAULT_PRE_COMMIT_BUDGET_MS } from "./stream.js";
 
 const DEFAULT_TIMEOUT_MS = 25000;
 
@@ -113,6 +113,7 @@ export function executeWithFallback({
   baseUrl = "https://api.inferhub.dev/v1",
   timeoutMs = DEFAULT_TIMEOUT_MS,
   firstByteTimeoutMs = DEFAULT_FIRST_BYTE_TIMEOUT_MS,
+  preCommitBudgetMs = DEFAULT_PRE_COMMIT_BUDGET_MS,
   requestSignal = null,
   onStreamOutcome = null,
   maxAttempts = 10
@@ -128,7 +129,7 @@ export function executeWithFallback({
     if (requestBody && requestBody.stream) {
       return executeStreamingWithSplice({
         candidates, requestBody, apiKey, metricsStore, fetchFn, baseUrl,
-        timeoutMs, firstByteTimeoutMs, requestSignal, onStreamOutcome, maxAttempts
+        timeoutMs, firstByteTimeoutMs, preCommitBudgetMs, requestSignal, onStreamOutcome, maxAttempts
       });
     }
 
