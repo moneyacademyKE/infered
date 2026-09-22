@@ -202,6 +202,7 @@ export function executeStreamingWithSplice({
     success: true,
     servedModel: served ? served.modelId : null,
     servedProvider: served ? served.providerId : null,
+    budgetTier: served ? served.budgetTier : null,
     attempts: attemptsUsed
   });
 

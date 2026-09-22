@@ -361,7 +361,7 @@ export default {
           // Wall-clock fallback: covers any shape where the executor's own
           // measurement is missing (cache-served, aborted stream flush).
           latencyMs: metrics.latencyMs || (Date.now() - requestStart),
-          budgetCap: maxFallbackPrice,
+          budgetCap: maxFallbackPrice ?? metrics.budgetTier ?? served.budgetTier ?? null,
           sessionId,
           ...overrides
         }));

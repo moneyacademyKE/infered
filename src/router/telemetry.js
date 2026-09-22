@@ -34,7 +34,7 @@ export function buildTelemetryHeaders({ served, result, toolWasHealed = false })
     "x-infered-savings-pct": String(served.savingsPct ?? 0),
     "x-infered-latency-ms": String(result.latencyMs || 100),
     "x-infered-ttft-ms": String(result.ttftMs || 80),
-    "x-infered-budget-tier": String(served.budgetTier || "0.10"),
+    "x-infered-budget-tier": String(served?.budgetTier ?? "default"),
     "x-infered-escalation-level": String(served.escalationLevel !== undefined ? served.escalationLevel : 0),
     "x-infered-tool-healed": toolWasHealed ? "true" : "false",
     "x-infered-attempts": String(result.attempts || 1)

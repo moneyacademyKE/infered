@@ -29,6 +29,15 @@
         (swap! violations conj {:file (str f) :loc loc}))
       (println (str "✓ " (format "%-35s" (str f)) " : " loc " lines (< 500 LOC)")))))
 
+;; Policy-drift guard (2026-09-22 incident): budget ceiling policy lives in
+;; CODE (DEFAULT_BUDGET_LADDER, src/router/pareto.js). An env pin in
+;; wrangler.jsonc silently overrides it in prod while the test suite keeps
+;; testing the code default -- the $0.10 -> $0.50 raise shipped as code but
+;; never took effect for exactly this reason.
+(when (str/includes? (slurp "wrangler.jsonc") "MAX_FALLBACK_PRICE")
+  (println "❌ VIOLATION: wrangler.jsonc pins MAX_FALLBACK_PRICE — budget policy belongs in DEFAULT_BUDGET_LADDER (src/router/pareto.js), never in env")
+  (swap! violations conj {:file "wrangler.jsonc" :loc 0}))
+
 (println "----------------------------------------------------------")
 (if (empty? @violations)
   (println "✅ ALL FILES COMPLY WITH STRICT <500 LOC & MODULARITY RULES!")
