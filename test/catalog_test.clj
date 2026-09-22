@@ -176,3 +176,17 @@
       (is (>= (get-in res [:tier :quality]) 0.95))
       (is (> (get-in res [:price :prompt]) 0)))))
 
+(deftest test-qwen-0902-registration
+  (testing "ali/qwen3.8-max-0902 resolves raw instead of silently rerouting to the default chain"
+    (let [res (run-node-eval
+               "import { resolveVirtualModel, MODEL_TIERS, OFFICIAL_PRICES } from './src/router/catalog.js';
+                console.log(JSON.stringify({
+                  resolved: resolveVirtualModel('ali/qwen3.8-max-0902'),
+                  hasTier: Boolean(MODEL_TIERS['ali/qwen3.8-max-0902']),
+                  hasPrice: Boolean(OFFICIAL_PRICES['ali/qwen3.8-max-0902'])
+                }));")]
+      (is (= ["ali/qwen3.8-max-0902"] (:resolved res))
+          "a raw request for the 0902 snapshot must resolve to the model itself, never the default chain")
+      (is (:hasTier res) "MODEL_TIERS entry required for raw resolution")
+      (is (:hasPrice res) "OFFICIAL_PRICES entry required for pricing/savings"))))
+
