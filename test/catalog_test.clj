@@ -161,20 +161,29 @@
       (is (= "ali/kimi-k3" (:empty res))))))
 
 (deftest test-qwen-metadata
-  (testing "ali/qwen3.8-max is properly registered in MODEL_TIERS and OFFICIAL_PRICES"
+  (testing "unsuffixed ali/qwen3.8-max is excised (disabled upstream); the -0902 snapshot is the registered qwen"
     (let [res (run-node-eval
-               "import { MODEL_TIERS, OFFICIAL_PRICES, getOfficialPrice, getModelMetadata } from './src/router/catalog.js';
+               "import { resolveVirtualModel, MODEL_TIERS, OFFICIAL_PRICES, getOfficialPrice, getModelMetadata } from './src/router/catalog.js';
                 console.log(JSON.stringify({
                   hasTier: Boolean(MODEL_TIERS['ali/qwen3.8-max']),
                   hasPrice: Boolean(OFFICIAL_PRICES['ali/qwen3.8-max']),
+                  resolved: resolveVirtualModel('ali/qwen3.8-max'),
+                  price: getOfficialPrice('ali/qwen3.8-max'),
                   tier: getModelMetadata('ali/qwen3.8-max'),
-                  price: getOfficialPrice('ali/qwen3.8-max')
+                  has0902Tier: Boolean(MODEL_TIERS['ali/qwen3.8-max-0902']),
+                  has0902Price: Boolean(OFFICIAL_PRICES['ali/qwen3.8-max-0902'])
                 }));")]
-      (is (:hasTier res))
-      (is (:hasPrice res))
-      (is (= "frontier-flagship" (get-in res [:tier :tier])))
-      (is (>= (get-in res [:tier :quality]) 0.95))
-      (is (> (get-in res [:price :prompt]) 0)))))
+      (is (not (:hasTier res)) "unsuffixed qwen must not be registered for raw resolution")
+      (is (not (:hasPrice res)) "no official price entry — excised, not dormant")
+      (is (= ["ali/glm-5.3" "zai/glm-5.3-flash" "zai/glm-5.3" "ali/kimi-k3" "cx/gpt-5.6-terra"]
+             (:resolved res))
+          "excised names fall to the default budget chain (Sol precedent), never 403-chase the dead pool")
+      (is (= 1 (get-in res [:price :prompt]))
+          "unknown-model lookups fall to the generic $1/$2 baseline")
+      (is (= "general" (get-in res [:tier :tier]))
+          "unknown-model metadata falls to the generic tier")
+      (is (:has0902Tier res) "the enabled -0902 snapshot stays registered for raw resolution")
+      (is (:has0902Price res) "the -0902 snapshot keeps its official price entry"))))
 
 (deftest test-qwen-0902-registration
   (testing "ali/qwen3.8-max-0902 resolves raw instead of silently rerouting to the default chain"
