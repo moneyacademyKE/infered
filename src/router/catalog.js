@@ -29,10 +29,10 @@ export const OFFICIAL_PRICES = {
   // ali/qwen3.8-max was excised the same day: disabled upstream (403
   // model_disabled on every node), so it must never be price-resolvable.
   "ali/qwen3.8-max-0902": { prompt: 2, completion: 6 },
-  "cx/gpt-5.6-terra": { prompt: 0.30, completion: 0.90 },
-  "zai/glm-5.3": { prompt: 0.20, completion: 0.40 },
-  "zai/glm-5.3-flash": { prompt: 0.06, completion: 0.10 },
-  "ali/kimi-k3": { prompt: 0.15, completion: 0.30 }
+  "cx/gpt-5.6-terra": { prompt: 2, completion: 12 },
+  "zai/glm-5.3": { prompt: 1.40, completion: 4.40 },
+  "zai/glm-5.3-flash": { prompt: 0.15, completion: 0.5 },
+  "ali/kimi-k3": { prompt: 3, completion: 15 }
 };
 
 // Budget cascade ordering (sol removed 2026-09-05 per owner directive —
