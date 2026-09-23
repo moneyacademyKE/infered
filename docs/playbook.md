@@ -28,14 +28,23 @@ bunx wrangler dev
 bunx wrangler deploy
 ```
 
-## 3. Configuring Virtual Tiers & Routing Policies
-Infered provides 5 standard virtual aliases and supports custom model targets:
-- `infered/auto`: Dynamically selects the best global Pareto model across all tiers.
-- `infered/fast`: Focuses on lowest TTFT & sub-300ms response time (`llama-3.1-8b`, `gpt-4o-mini`, `deepseek-v3`).
-- `infered/smart`: Directs to flagship models (`claude-3.5-sonnet`, `gpt-4o`, `llama-3.3-70b`).
-- `infered/reasoning`: Selects deep reasoning models (`deepseek-r1`, `o1-preview`, `o3-mini`).
-- `infered/cheap`: Maximum token discount optimizer.
-- Direct models (e.g. `infered/claude-3.5-sonnet`): Routes to the cheapest healthy spot node serving that exact model.
+## 3. Model Catalog (current: 5 chain products)
+Routing is data-driven from `src/router/catalog.js` — chains are plain arrays; the router resolves the first link that has a live, in-budget spot ask:
+
+| Product | Cascade order |
+|---|---|
+| `infered/glm-budget` *(default)* | `ali/glm-5.3` → `zai/glm-5.3-flash` → `zai/glm-5.3` → `ali/kimi-k3` → `cx/gpt-5.6-terra` |
+| `infered/astra-budget` | `cx/gpt-6-astra` → `zai/glm-5.3-flash` → `ali/kimi-k3` |
+| `infered/astra-terra` | `cx/gpt-6-astra` → `cx/gpt-5.6-terra` → `ali/kimi-k3` → `zai/glm-5.3-flash` |
+| `infered/terra-kimi` | `cx/gpt-5.6-terra` → `ali/kimi-k3` → `zai/glm-5.3-flash` |
+| `infered/kimi-glm` | `ali/kimi-k3` → `zai/glm-5.3-flash` → `ali/qwen3.8-max-0902` |
+
+- Unknown/unregistered model names and requests without a model fall to `infered/glm-budget`.
+- Budget ladder: $0.50 tier-0 ceiling (spot asks only), then an unconstrained last-resort tier that admits official list prices (counted as `officialLastResortServes` on `/v1/metrics`).
+- `cx/gpt-6-astra` is ceiling-exempt: any verified spot ask is eligible.
+- `X-Infered-Tier: strong` starts a chain at its designated strong link (`CHAIN_STRONG_LINKS` in catalog.js).
+- `X-Session-ID` (or an automatic conversation-head fingerprint) pins the served model within a session.
+- Raw model requests (e.g. `ali/qwen3.8-max-0902`) route to that exact model if it is registered in `MODEL_TIERS`; unregistered names fall to the default chain. Retired names (`cx/gpt-5.6-sol`, `ali/qwen3.8-max`) are excised — they land on the default chain or fail fast (403-class upstream refusals end the candidate chase immediately).
 
 ## 4. Tuning Pareto Weights
 You can tune weights globally via environment variables in `wrangler.jsonc` or per-request via the `X-Infered-Weights` header:
