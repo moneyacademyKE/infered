@@ -10,7 +10,7 @@
       (throw (ex-info (str "Node eval error: " err) {:err err :out out})))))
 
 (deftest test-pricing-calculations-and-defaults
-  (testing "Calculates blended prices and defaults all cascade models to <= $0.10 output tokens"
+  (testing "Calculates blended prices and defaults all cascade models to <= $0.50 output tokens (tier-0 ceiling)"
     (let [res (run-node-eval
                "import { calculateBlendedPrice, createDefaultMarketQuotes, createPriceCache, getQuotesForModel } from './src/router/pricing.js';
 
@@ -28,14 +28,14 @@
                   glmOutput: glmQuotes[0].completion,
                   terraOutput: terraQuotes[0].completion,
                   kimiOutput: kimiQuotes[0].completion,
-                  allUnderTenCents: [flashQuotes[0], glmQuotes[0], terraQuotes[0], kimiQuotes[0]].every(q => q.completion <= 0.10)
+                  allUnderFiftyCents: [flashQuotes[0], glmQuotes[0], terraQuotes[0], kimiQuotes[0]].every(q => q.completion <= 0.50)
                 }));")]
       (is (= 0.0475 (:blended res)))
-      (is (<= (:flashOutput res) 0.10))
-      (is (<= (:glmOutput res) 0.10))
-      (is (<= (:terraOutput res) 0.10))
-      (is (<= (:kimiOutput res) 0.10))
-      (is (:allUnderTenCents res)))))
+      (is (<= (:flashOutput res) 0.50))
+      (is (<= (:glmOutput res) 0.50))
+      (is (<= (:terraOutput res) 0.50))
+      (is (<= (:kimiOutput res) 0.50))
+      (is (:allUnderFiftyCents res)))))
 
 (deftest test-inferhub-orderbook-ingestion
   (testing "Parses live asks_in and asks_out from InferHub models response"

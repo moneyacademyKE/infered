@@ -16,13 +16,15 @@ export function calculateBlendedPrice(promptPrice, completionPrice) {
  * where output tokens trade <= $0.10 / 1M tokens.
  */
 const MODEL_SPOT_MULTIPLIERS = {
-  "cx/gpt-6-astra": [0.0050, 0.0050, 0.0050],      // $50.00 * 0.005 = $0.2500 (99.5% discount, per market min ask)
-  "ali/glm-5.3": [0.0080, 0.0100, 0.0300],         // $4.40 * 0.008 = $0.0352 (99.2% discount, per market min ask 2026-09-15)
-  "ali/qwen3.8-max-0902": [0.0060, 0.0080, 0.0100], // $6.00 * 0.006 = $0.0360 (99.4% discount, per market min ask 2026-09-22)
-  "zai/glm-5.3-flash": [0.0800, 0.0900, 0.1000],   // $0.10 * 0.08 = $0.0080 (92.0% discount)
-  "zai/glm-5.3": [0.1000, 0.1200, 0.1500],         // $0.50 * 0.10 = $0.0500 (90.0% discount)
-  "cx/gpt-5.6-terra": [0.0100, 0.0120, 0.0150],    // $1.00 * 0.01 = $0.0100 (99.0% discount)
-  "ali/kimi-k3": [0.0350, 0.0380, 0.0400]          // $2.40 * 0.035 = $0.0840 (96.5% discount)
+  // Ratios of official completion price. Seeded min asks match the live
+  // InferHub book (deadname-audit prober snapshot 2026-09-23).
+  "cx/gpt-6-astra": [0.0190, 0.0250, 0.0300],      // $50.00 * 0.019 = $0.95 (feed min ask, 29 asks)
+  "ali/glm-5.3": [0.0300, 0.0350, 0.0400],         // $4.40 * 0.03 = $0.132 (feed min ask, 7 asks)
+  "ali/qwen3.8-max-0902": [0.0050, 0.0060, 0.0080], // $6.00 * 0.005 = $0.03 (feed min ask, 11 asks)
+  "zai/glm-5.3-flash": [0.0990, 0.1100, 0.1300],   // $0.50 * 0.099 = $0.0495 (feed min ask, 9 asks)
+  "zai/glm-5.3": [0.0400, 0.0500, 0.0600],         // $4.40 * 0.04 = $0.176 (feed min ask, 10 asks)
+  "cx/gpt-5.6-terra": [0.0010, 0.0012, 0.0015],    // $12.00 * 0.001 = $0.012 (feed min ask, 24 asks)
+  "ali/kimi-k3": [0.0230, 0.0260, 0.0300]          // $15.00 * 0.023 = $0.345 (feed min ask, 8 asks)
 };
 
 export function createDefaultMarketQuotes() {

@@ -19,21 +19,22 @@
                 const priceCache = createPriceCache();
                 const metricsStore = createMetricsStore();
 
-                // glm-budget head is ali/glm-5.3 (seeded min ask $0.0352 out)
-                // Default threshold = 0.10 -> head serves (sol-budget reroutes to glm-budget)
+                // glm-budget head is ali/glm-5.3 (seeded min ask $0.132 out,
+                // calibrated to the 2026-09-23 feed). Default tier-0 ceiling
+                // = 0.50 -> head serves (sol-budget reroutes to glm-budget)
                 const candDefault = rankCandidates({
                   model: 'infered/sol-budget',
                   priceCache,
                   metricsStore,
-                  maxFallbackPrice: 0.10
+                  maxFallbackPrice: 0.50
                 });
 
-                // User tightens threshold to 0.02 -> head's $0.0352 > $0.02 -> must switch to Flash ($0.008)
+                // User tightens threshold to 0.10 -> head's $0.132 > $0.10 -> must switch to Flash ($0.0495)
                 const candTight = rankCandidates({
                   model: 'infered/sol-budget',
                   priceCache,
                   metricsStore,
-                  maxFallbackPrice: 0.02
+                  maxFallbackPrice: 0.10
                 });
 
                 // Live market price update: Sol ask increases to $0.14
@@ -43,12 +44,13 @@
                   { providerId: 'inferhub-gamma', modelId: 'cx/gpt-5.6-sol', prompt: 0.02, completion: 0.16 }
                 ]);
 
-                // Query with standard 0.10 threshold -> Sol is now $0.14 > $0.10 -> must switch to Flash
+                // Query with standard tier-0 ceiling (0.50) -> sol fixture
+                // stays invisible (excised), so the head keeps serving
                 const candAfterSpike = rankCandidates({
                   model: 'infered/sol-budget',
                   priceCache,
                   metricsStore,
-                  maxFallbackPrice: 0.10
+                  maxFallbackPrice: 0.50
                 });
 
                 console.log(JSON.stringify({
@@ -59,7 +61,7 @@
                 }));")]
       ;; sol removed from chains and ali/glm-5.3 leads glm-budget (2026-09-15):
       ;; the sol fixture asks are invisible to sol-budget, so the head wins at
-      ;; the loose threshold; only a 0.02 ceiling drops below its cheapest ask.
+      ;; the tier-0 ceiling; only a 0.10 ceiling drops below its $0.132 ask.
       (is (= "ali/glm-5.3" (:defaultModel res)))
       (is (= "zai/glm-5.3-flash" (:tightModel res)))
       (is (= "ali/glm-5.3" (:afterSpikeModel res)))
