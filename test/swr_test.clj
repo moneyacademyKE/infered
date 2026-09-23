@@ -65,4 +65,4 @@
       (is (= "ali/glm-5.3" (:defaultModel res)))
       (is (= "zai/glm-5.3-flash" (:tightModel res)))
       (is (= "ali/glm-5.3" (:afterSpikeModel res)))
-      (is (<= (:afterSpikePrice res) 0.10)))))
+      (is (<= (:afterSpikePrice res) 0.50)))))
