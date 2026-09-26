@@ -8,7 +8,7 @@ export function corsHeaders() {
     "Access-Control-Allow-Origin": "*",
     "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS",
     "Access-Control-Allow-Headers": "Content-Type, Authorization, X-Infered-Weights, X-Infered-Max-Price, X-Infered-Tier, X-Session-ID, X-Session-Affinity, X-Infered-Cache, X-InferHub-Provider",
-    "Access-Control-Expose-Headers": "x-infered-selected-model, x-infered-provider, x-infered-savings-pct, x-infered-latency-ms, x-infered-ttft-ms, x-infered-cache, x-infered-budget-tier, x-infered-escalation-level, x-infered-tool-healed, x-infered-attempts"
+    "Access-Control-Expose-Headers": "x-infered-selected-model, x-infered-provider, x-infered-savings-pct, x-infered-latency-ms, x-infered-ttft-ms, x-infered-cache, x-infered-budget-tier, x-infered-escalation-level, x-infered-attempts"
   };
 }
 
@@ -26,7 +26,7 @@ export function jsonResponse(data, status = 200, extraHeaders = {}) {
 /**
  * Builds standard x-infered-* response headers for client visibility.
  */
-export function buildTelemetryHeaders({ served, result, toolWasHealed = false }) {
+export function buildTelemetryHeaders({ served, result }) {
   return {
     "x-infered-cache": "MISS",
     "x-infered-selected-model": served.modelId,
@@ -36,7 +36,6 @@ export function buildTelemetryHeaders({ served, result, toolWasHealed = false })
     "x-infered-ttft-ms": String(result.ttftMs || 80),
     "x-infered-budget-tier": String(served?.budgetTier ?? "default"),
     "x-infered-escalation-level": String(served.escalationLevel !== undefined ? served.escalationLevel : 0),
-    "x-infered-tool-healed": toolWasHealed ? "true" : "false",
     "x-infered-attempts": String(result.attempts || 1)
   };
 }

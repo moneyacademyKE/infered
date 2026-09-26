@@ -5,8 +5,6 @@ import { createPriceCache, updateSpotPrices, calculateSavingsPct, ingestInferHub
 import { createMetricsStore, getProviderStats, getUsageSummary } from "./router/metrics.js";
 import { createCacheStore, computeRequestKey, getCachedResponse, putCachedResponse } from "./router/cache.js";
 import { resolveSessionId, getSessionPin, recordSessionPin } from "./router/session.js";
-import { healToolCalls } from "./router/healer.js";
-import { createExemplarStore, recordToolOutcome, enrichPromptWithToolExemplars } from "./router/exemplars.js";
 import { rankCandidates, DEFAULT_WEIGHTS, ROUTING_POLICIES } from "./router/pareto.js";
 import { executeWithFallback, executeWithChainFallback } from "./router/client.js";
 import { collectAnalytics, renderAnalyticsPage } from "./ui/analytics.js";
@@ -15,7 +13,6 @@ import { corsHeaders, jsonResponse, buildTelemetryHeaders, recordRoutingAnalytic
 let globalPriceCache = null;
 let globalMetricsStore = null;
 let globalCacheStore = null;
-let globalExemplarStore = null;
 
 const SWR_SYNC_INTERVAL_MS = 15000; // 15 seconds
 
@@ -23,12 +20,10 @@ function getOrInitState() {
   if (!globalPriceCache) globalPriceCache = createPriceCache();
   if (!globalMetricsStore) globalMetricsStore = createMetricsStore();
   if (!globalCacheStore) globalCacheStore = createCacheStore();
-  if (!globalExemplarStore) globalExemplarStore = createExemplarStore();
   return {
     priceCache: globalPriceCache,
     metricsStore: globalMetricsStore,
-    cacheStore: globalCacheStore,
-    exemplarStore: globalExemplarStore
+    cacheStore: globalCacheStore
   };
 }
 
@@ -108,7 +103,7 @@ export default {
       return new Response(null, { status: 204, headers: corsHeaders() });
     }
 
-    const { priceCache, metricsStore, cacheStore, exemplarStore } = getOrInitState();
+    const { priceCache, metricsStore, cacheStore } = getOrInitState();
     const apiKey = env?.INFERHUB_API_KEY || request.headers.get("Authorization")?.replace(/^Bearer\s+/i, "");
     const baseUrl = env?.INFERHUB_BASE_URL || "https://api.inferhub.dev/v1";
 
@@ -153,7 +148,6 @@ export default {
           }, {}),
         cachedResponses: cacheStore.responseCache.size,
         activeSessions: cacheStore.sessionAffinity.size,
-        toolStats: exemplarStore.toolStats,
         usage: getUsageSummary(metricsStore)
       });
     }
@@ -198,7 +192,6 @@ export default {
         avgSavingsPct: avgSavings,
         quotes: quoteList,
         cachedResponsesCount: cacheStore.responseCache.size,
-        toolStats: exemplarStore.toolStats,
         usage: getUsageSummary(metricsStore),
         history: metricsStore.history
       });
@@ -275,14 +268,9 @@ export default {
           sessionAffinityModel: sessionAffinity?.modelId,
           startAtModel
         });
-        const execute = (cands) => {
-          let body = requestBody;
-          if (body.tools && Array.isArray(body.tools) && cands[0]) {
-            body = enrichPromptWithToolExemplars(body, cands[0].modelId);
-          }
-          return executeWithFallback({
+        const execute = (cands) => executeWithFallback({
             candidates: cands,
-            requestBody: body,
+            requestBody,
             apiKey,
             metricsStore,
             fetchFn,
@@ -293,7 +281,6 @@ export default {
               else pendingStreamOutcome = o;
             }
           });
-        };
 
         const { result, candidates, fallbackChain } = await executeWithChainFallback({
           requestedModel,
@@ -322,22 +309,7 @@ export default {
         const selected = candidates[0];
         const served = result.selectedCandidate || selected;
 
-        let responseBody = result.responseBody;
-        let toolWasHealed = false;
-
-        // 5. Tool Call Autohealing: Apply Semantic Sieve
-        if (responseBody && responseBody.choices && requestBody.tools) {
-          const healedChoices = healToolCalls(responseBody.choices, requestBody.tools);
-          toolWasHealed = healedChoices.some(c => c.message?.tool_calls?.some(tc => tc._healed));
-          responseBody = { ...responseBody, choices: healedChoices };
-
-          // Record tool learning telemetry
-          for (const c of healedChoices) {
-            for (const tc of c.message?.tool_calls || []) {
-              recordToolOutcome(exemplarStore, tc.function?.name, served.modelId, true, tc._healed);
-            }
-          }
-        }
+        const responseBody = result.responseBody;
 
         recordSessionPin(cacheStore, env, ctx, sessionId, served.providerId, served.modelId);
 
@@ -395,7 +367,7 @@ export default {
           recordDecision(result);
         }
 
-        const telemetryHeaders = buildTelemetryHeaders({ served, result, toolWasHealed });
+        const telemetryHeaders = buildTelemetryHeaders({ served, result });
 
         if (requestBody.stream && responseStream) {
           return new Response(responseStream, {
