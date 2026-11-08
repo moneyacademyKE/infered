@@ -13,6 +13,7 @@
 (load-file "test/stream_test.clj")
 (load-file "test/chase_test.clj")
 (load-file "test/cache_test.clj")
+(load-file "test/session_test.clj")
 (load-file "test/swr_test.clj")
 (load-file "test/worker_test.clj")
 
@@ -24,14 +25,15 @@
       stream-res  (run-tests 'stream-test)
       chase-res   (run-tests 'chase-test)
       cache-res   (run-tests 'cache-test)
+      session-res (run-tests 'session-test)
       swr-res     (run-tests 'swr-test)
       worker-res  (run-tests 'worker-test)
       total-fail  (+ (:fail catalog-res) (:fail metrics-res) (:fail pricing-res)
                      (:fail pareto-res) (:fail client-res) (:fail stream-res) (:fail chase-res)
-                     (:fail cache-res) (:fail swr-res) (:fail worker-res))
+                     (:fail cache-res) (:fail session-res) (:fail swr-res) (:fail worker-res))
       total-err   (+ (:error catalog-res) (:error metrics-res) (:error pricing-res)
                      (:error pareto-res) (:error client-res) (:error stream-res) (:error chase-res)
-                     (:error cache-res) (:error swr-res) (:error worker-res))]
+                     (:error cache-res) (:error session-res) (:error swr-res) (:error worker-res))]
   (println "\n----------------------------------------------------------")
   (if (and (zero? total-fail) (zero? total-err))
     (do
