@@ -30,6 +30,7 @@
 
 import { recordSample, recordUsage } from "./metrics.js";
 import { getOfficialPrice } from "./catalog.js";
+import { takeCompleteSseFrames, windowHasCompletionToken, jsonCompletionToSseStream } from "./sse.js";
 
 const DEFAULT_TIMEOUT_MS = 25000;
 export const DEFAULT_FIRST_BYTE_TIMEOUT_MS = 15000;
@@ -40,22 +41,9 @@ export const DEFAULT_PRE_COMMIT_BUDGET_MS = 30000;
 const NON_RETRYABLE_OPEN_STATUSES = new Set([400, 401, 403, 404]);
 export { NON_RETRYABLE_OPEN_STATUSES };
 const MAX_FIRST_CHUNK_BYTES = 1 * 1024 * 1024;
-const CARRY_CHARS = 48;
-const CONTENT_NEEDLE = '"content":"';
+const MAX_SSE_EVENT_CHARS = 1 * 1024 * 1024;
 const ERROR_NEEDLE = '{"error":{';
 const DONE_FRAME = "data: [DONE]\n\n";
-
-function windowHasContentToken(window) {
-  let idx = window.indexOf(CONTENT_NEEDLE);
-  while (idx !== -1) {
-    // Empty content is exactly "content":""; anything else (incl. escaped
-    // quotes) is a real token. "content":null and "reasoning_content":" never
-    // match the needle.
-    if (window[idx + CONTENT_NEEDLE.length] !== '"') return true;
-    idx = window.indexOf(CONTENT_NEEDLE, idx + 1);
-  }
-  return false;
-}
 
 async function readFirstUpstreamChunk(reader, signal, deadlineMs) {
   if (signal && signal.aborted) {
@@ -81,7 +69,7 @@ async function readFirstUpstreamChunk(reader, signal, deadlineMs) {
     // A stream whose first bytes are already [DONE] is an empty completion,
     // not a usable candidate — fail over like any other miss.
     const head = new TextDecoder().decode(chunk.slice(0, 4096));
-    if (head.includes("[DONE]") && !head.includes(CONTENT_NEEDLE)) {
+    if (head.includes("[DONE]") && !windowHasCompletionToken(head)) {
       return { ok: false, reason: "Upstream stream completed without any content tokens", clientGone: false };
     }
     return { ok: true, buffered: [chunk] };
@@ -133,6 +121,21 @@ export async function openUpstreamStream({
       return {
         ok: false, status: response.status, latencyMs: Date.now() - startTime,
         reason: `Provider ${candidate.providerId} (${candidate.modelId}) returned ${response.status}: ${errText}`
+      };
+    }
+    // A 200 JSON completion is a valid answer even when the caller requested
+    // SSE — InferHub and the standalone mock both use this shape. Adapt it at
+    // the boundary instead of feeding a frameless JSON body to the SSE relay.
+    const contentType = response.headers.get("content-type") || "";
+    if (!contentType.includes("text/event-stream")) {
+      detachClientAbort();
+      const json = await response.json().catch(() => null);
+      if (!json || !Array.isArray(json.choices)) {
+        return { ok: false, status: 502, latencyMs: Date.now() - startTime, reason: "Upstream returned a non-SSE, non-completion body" };
+      }
+      return {
+        ok: true, reader: jsonCompletionToSseStream(json).getReader(), buffered: [],
+        startTime, detachClientAbort: () => {}
       };
     }
     if (!response.body) {
@@ -270,7 +273,7 @@ export function executeStreamingWithSplice({
 
   (async () => {
     let heldErrorChunk = null;
-    let carry = "";
+    let pending = "";
     try {
       for (const candidate of candidates) {
         // Only CONTENT is terminal. A [DONE] with zero content is a corpse
@@ -320,45 +323,41 @@ export function executeStreamingWithSplice({
         heldErrorChunk = null;
         let candidateDied = false;
         let emptyDone = false;
-        // Per-candidate parser state: the carry (and the decoder's pending
-        // byte sequence) from a DEAD candidate must not leak into the next
-        // one — a stale carry holding "[DONE]" would classify the spliced
-        // candidate's first chunk as an empty-completion corpse and kill the
-        // splice in its first frame (found empirically: the splice opened,
-        // then instantly "died" with an error it never sent).
-        carry = "";
+        // Per-candidate parser state: a partial SSE event or pending UTF-8
+        // bytes from a DEAD candidate must never leak into the next one.
+        pending = "";
         decoder = new TextDecoder();
 
-        // Classify-then-relay, one chunk at a time. A pre-content in-band
-        // error frame is WITHHELD (not relayed): if a splice follows, the
-        // client never sees it; if candidates run out, it is forwarded. A
-        // POST-content error frame is relayed (bytes already shipped) but
-        // poisons the stream — it ends as a recorded failure, never a
-        // synthesized success.
-        const relay = async (chunk) => {
-          const text = carry + decoder.decode(chunk, { stream: true });
-          carry = text.slice(-CARRY_CHARS);
-          if (!contentSeen && windowHasContentToken(text)) contentSeen = true;
-          const errorFrame = text.includes(ERROR_NEEDLE);
-          if (errorFrame && !contentSeen) {
-            heldErrorChunk = chunk;
-            return "dead";
-          }
-          if (text.includes("[DONE]")) {
-            // A [DONE] with ZERO content is a corpse, not a completion: the
-            // empty terminator is WITHHELD (relaying it would commit the
-            // client response to an empty answer), this candidate fails, and
-            // the next candidate's content completes the response. Only a
-            // [DONE] that FOLLOWS content terminates the protocol.
-            if (!contentSeen) {
-              emptyDone = true;
+        // Relay complete SSE events only. A partial trailing event stays in
+        // `pending` and is discarded if the candidate dies — appending [DONE]
+        // after partial JSON is how an upstream truncation becomes a client
+        // "error decoding response body".
+        const relay = async (chunk, final = false) => {
+          pending += final ? decoder.decode() : decoder.decode(chunk, { stream: true });
+          if (pending.length > MAX_SSE_EVENT_CHARS) return "dead";
+          const split = takeCompleteSseFrames(pending);
+          pending = split.rest;
+          for (const frame of split.frames) {
+            if (!contentSeen && windowHasCompletionToken(frame)) contentSeen = true;
+            const errorFrame = frame.includes(ERROR_NEEDLE);
+            if (errorFrame && !contentSeen) {
+              heldErrorChunk = encoder.encode(frame);
               return "dead";
             }
-            doneSeen = true;
+            if (frame.includes("[DONE]")) {
+              // A [DONE] with zero actionable completion is a corpse: withhold
+              // it and let the next candidate answer. Tool calls count.
+              if (!contentSeen) {
+                emptyDone = true;
+                return "dead";
+              }
+              doneSeen = true;
+            }
+            await writeChunk(encoder.encode(frame));
+            if (errorFrame) return "poisoned";
+            if (doneSeen) return "finished";
           }
-          await writeChunk(chunk);
-          if (errorFrame) return "poisoned";
-          return doneSeen ? "finished" : "continue";
+          return "continue";
         };
 
         try {
@@ -372,6 +371,7 @@ export function executeStreamingWithSplice({
             if (done) break;
             state = await relay(value);
           }
+          if (state === "continue") state = await relay(null, true);
           if (state === "dead" || state === "poisoned") candidateDied = true;
         } catch (err) {
           candidateDied = true;

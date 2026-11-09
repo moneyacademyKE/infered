@@ -19,6 +19,7 @@
 (load-file "test/swr_test.clj")
 (load-file "test/worker_test.clj")
 (load-file "test/refusal_test.clj")
+(load-file "test/tool_stream_test.clj")
 
 (let [catalog-res (run-tests 'catalog-test)
       metrics-res (run-tests 'metrics-test)
@@ -34,16 +35,17 @@
       swr-res     (run-tests 'swr-test)
       worker-res  (run-tests 'worker-test)
       refusal-res (run-tests 'refusal-test)
+      tool-stream-res (run-tests 'tool-stream-test)
       total-fail  (+ (:fail catalog-res) (:fail metrics-res) (:fail pricing-res)
                      (:fail pareto-res) (:fail client-res) (:fail fallback-res) (:fail security-res)
                      (:fail stream-res) (:fail chase-res)
                      (:fail cache-res) (:fail session-res) (:fail swr-res) (:fail worker-res)
-                     (:fail refusal-res))
+                     (:fail refusal-res) (:fail tool-stream-res))
       total-err   (+ (:error catalog-res) (:error metrics-res) (:error pricing-res)
                      (:error pareto-res) (:error client-res) (:error fallback-res) (:error security-res)
                      (:error stream-res) (:error chase-res)
                      (:error cache-res) (:error session-res) (:error swr-res) (:error worker-res)
-                     (:error refusal-res))]
+                     (:error refusal-res) (:error tool-stream-res))]
   (println "\n----------------------------------------------------------")
   (if (and (zero? total-fail) (zero? total-err))
     (do
