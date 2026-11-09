@@ -29,7 +29,7 @@
 
 (try
   (let [r (json/parse-string (:out res) true)
-        rows (get-in r [:result :results])]
+        rows (get-in r [:result 0 :results])]
     (if (seq rows)
       (do (println "rows:" (count rows))
           (doseq [g (group-by :requested_model rows)]
@@ -39,7 +39,7 @@
                   served (frequencies (map :selected_model rs))
                   atts (frequencies (map :attempts rs))
                   errs (frequencies (map :error rs))]
-              (println "---" (key g) ":" (count rs) "reqs | ok:" oks "fail:" fails)
+              (println "---" (first g) ":" (count rs) "reqs | ok:" oks "fail:" fails)
               (println "   served:" served)
               (println "   attempts:" atts)
               (println "   errors:" errs)))
