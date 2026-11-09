@@ -1,16 +1,17 @@
 #!/usr/bin/env bb
-;; D1 decision rows for the astra stress window (last 25 min)
+;; D1 decision rows for the last 25 minutes. Env-only credentials (audit 2026-11-08):
+;; CF_EMAIL, CF_KEY, CF_ACCT — never shell history.
 (require '[cheshire.core :as json]
-         '[clojure.java.shell :refer [sh]]
-         '[clojure.string :as str])
+         '[clojure.java.shell :refer [sh]])
 
-(def hist-line (->> (slurp (str (System/getProperty "user.home") "/.zsh_history"))
-                    clojure.string/split-lines
-                    (filter #(and (re-find #"c3acded8" %) (re-find #"CLOUDFLARE_API_KEY" %)))
-                    last))
-(def email (second (re-find #"CLOUDFLARE_EMAIL=(\S+)" hist-line)))
-(def key (second (re-find #"CLOUDFLARE_API_KEY=\"([^\"]+)\"" hist-line)))
-(def acct (second (re-find #"CLOUDFLARE_ACCOUNT_ID=\"([^\"]+)\"" hist-line)))
+(def email (System/getenv "CF_EMAIL"))
+(def key   (System/getenv "CF_KEY"))
+(def acct  (System/getenv "CF_ACCT"))
+
+(when (or (nil? email) (nil? key) (nil? acct))
+  (println "Need CF_EMAIL, CF_KEY, CF_ACCT in the environment. Export them explicitly:")
+  (println "  export CF_EMAIL=... CF_KEY=... CF_ACCT=c3acded8... && bb scripts/d1-stress-window.bb")
+  (System/exit 2))
 
 (def db-id "b8c91497-e416-4315-8dba-256f9f5652b0")
 (def payload (json/generate-string
