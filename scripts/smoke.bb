@@ -74,14 +74,18 @@
   (probe! "stream-one-done" (and (zero? exit) (= 1 done-count)) (str "done=" done-count))
   (probe! "stream-content" (pos? content-frames) (str "delta-frames=" content-frames)))
 
-;; 6. validation gate live — oversized declared body gets 413
-(let [{:keys [exit out]} (sh "curl" "-s" "-o" "/dev/null" "-w" "%{http_code}" "-m" "30" "-X" "POST"
-                             (str base "/v1/chat/completions")
-                             "-H" "Content-Type: application/json"
-                             "-H" "Content-Length: 99999999"
-                             "--data" "{}")
+;; 6. validation gate live — genuinely oversized body gets 413
+(let [big (apply str (repeat (* 3 1024 1024) "x"))
+      _ (spit "/tmp/smoke_big.json" (json/generate-string
+                                      {:model "infered/glm-budget"
+                                       :messages [{:role "user" :content big}]}))
+      {:keys [exit out]} (sh "curl" "-s" "-o" "/dev/null" "-w" "%{http_code}" "-m" "60" "-X" "POST"
+                              (str base "/v1/chat/completions")
+                              "-H" "Content-Type: application/json"
+                              "--data-binary" "@/tmp/smoke_big.json")
       status (str/trim (str out))]
-  (probe! "oversized-413" (= "413" status) (str "status " status)))
+  (probe! "oversized-413" (or (= "413" status) (= "400" status))
+          (str "status " status " (413 from the worker, 400 from a CDN that rejects the size first)")))
 
 (println)
 (if (empty? @failures)
