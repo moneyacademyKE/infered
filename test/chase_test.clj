@@ -10,7 +10,7 @@
       (throw (ex-info (str "Node eval error: " err) {:err err :out out})))))
 
 (deftest test-non-retryable-open-short-circuits-the-chase
-  (testing "A 4xx open (401/403/404) fails identically on every node: one attempt, not a silent ten-node chase"
+  (testing "A 4xx open fails identically on every node OF A MODEL: one attempt per model, not a silent ten-node chase"
     (let [res (run-node-eval
                "import { executeWithFallback } from './src/router/client.js';
                 import { createMetricsStore } from './src/router/metrics.js';
@@ -19,6 +19,9 @@
                 // Every open returns the account-level disable InferHub serves
                 // for ali/qwen3.8-max (reproduced live 2026-09-22: 60s+ of
                 // zero-byte silence while the router chased ~10 dead nodes).
+                // All three candidates are nodes of the SAME model — the exact
+                // original chase disease. (Different models each get their one
+                // honest attempt: that's the cascade, not a chase.)
                 const fetchFn = async () => new Response(
                   JSON.stringify({ error: { message: 'model disabled in your preferences', type: 'model_disabled' } }),
                   { status: 403, headers: { 'Content-Type': 'application/json' } });
@@ -26,8 +29,8 @@
                 const result = await executeWithFallback({
                   candidates: [
                     { providerId: 'a', modelId: 'ma', savingsPct: 10, blendedPrice: 0.1 },
-                    { providerId: 'b', modelId: 'mb', savingsPct: 10, blendedPrice: 0.1 },
-                    { providerId: 'c', modelId: 'mc', savingsPct: 10, blendedPrice: 0.1 }
+                    { providerId: 'b', modelId: 'ma', savingsPct: 10, blendedPrice: 0.1 },
+                    { providerId: 'c', modelId: 'ma', savingsPct: 10, blendedPrice: 0.1 }
                   ],
                   requestBody: { stream: true, messages: [{ role: 'user', content: 'hi' }] },
                   apiKey: 'k', metricsStore, fetchFn

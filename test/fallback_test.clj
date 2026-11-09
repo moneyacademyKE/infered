@@ -99,3 +99,51 @@
       (is (:success res) "fallback success serves the request")
       (is (= "infered/glm-budget" (:fallbackChain res)))
       (is (= 2 (:attempts res)) "success path still sums attempts: 1 + 1"))))
+
+(deftest test-chain-fallback-streaming-getter-merge
+  (testing "fallback success on a STREAMING result (getter-only attempts, live view for splices) must not crash the merge"
+    (let [res (run-node-eval
+               "import { executeWithChainFallback } from './src/router/client.js';
+
+                const ranked = {
+                  'infered/astra-budget': [
+                    { providerId: 'a1', modelId: 'm-a', blendedPrice: 0.1, savingsPct: 90 }
+                  ],
+                  'infered/glm-budget': [
+                    { providerId: 'g1', modelId: 'm-g', blendedPrice: 0.12, savingsPct: 88 }
+                  ]
+                };
+
+                let liveAttempts = 2;
+                const execute = async (cands) => {
+                  if (cands[0].providerId === 'a1') {
+                    return { success: false, status: 503, attempts: 1,
+                             failoverErrors: [{ providerId: 'a1', modelId: 'm-a', status: 503, error: 'dead' }] };
+                  }
+                  // Real streaming settle shape: live-view get+set (a splice
+                  // bumps the counter; the merge adjusts it — both through
+                  // the same property, one source of truth).
+                  return { success: true, status: 200,
+                           get attempts() { return liveAttempts; },
+                           set attempts(v) { liveAttempts = v; },
+                           get selectedCandidate() { return cands[0]; },
+                           failoverErrors: [] };
+                };
+
+                const { result, fallbackChain } = await executeWithChainFallback({
+                  requestedModel: 'infered/astra-budget',
+                  rank: (m) => ranked[m] || [],
+                  execute
+                });
+                liveAttempts++; // a post-merge splice bumps the same merged counter
+
+                console.log(JSON.stringify({
+                  success: result.success,
+                  fallbackChain,
+                  mergedAttempts: result.attempts,
+                  liveAfterBump: result.attempts
+                }));")]
+      (is (:success res) "the fallback's success is the request's success")
+      (is (= "infered/glm-budget" (:fallbackChain res)))
+      (is (= 4 (:mergedAttempts res)) "primary 1 + fallback live 2, read AFTER the bump: the live view must survive the merge")
+      (is (= 4 (:liveAfterBump res)) "read twice, still live: no frozen copy"))))

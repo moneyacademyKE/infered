@@ -38,6 +38,7 @@ export const DEFAULT_PRE_COMMIT_BUDGET_MS = 30000;
 // node-level — every remaining candidate refuses identically, so chasing
 // them is pure silent dead time before the client's answer.
 const NON_RETRYABLE_OPEN_STATUSES = new Set([400, 401, 403, 404]);
+export { NON_RETRYABLE_OPEN_STATUSES };
 const MAX_FIRST_CHUNK_BYTES = 1 * 1024 * 1024;
 const CARRY_CHARS = 48;
 const CONTENT_NEEDLE = '"content":"';
@@ -192,6 +193,14 @@ export function executeStreamingWithSplice({
   let attemptsUsed = 0;
   let budgetCut = false;
   let nonRetryableOpen = false;
+  // Model-level refusal poisoning: a 4xx open (403 model_disabled etc.) is an
+  // ACCOUNT-level verdict, not a node-level flake — every remaining node of
+  // that model refuses identically. The `break` that used to live here killed
+  // the WHOLE candidate loop, so one disabled head model 503'd the request
+  // instead of cascading to the next chain member (live 2026-11-09: 4 of 7
+  // models disabled account-side; terra-kimi died in 0.4s, kimi-glm never
+  // reached its live qwen tail). Skip the model, keep the chain alive.
+  const refusedModels = new Set();
   let contentSeen = false;
   let doneSeen = false;
   let committed = false;
@@ -230,8 +239,15 @@ export function executeStreamingWithSplice({
         // candidate that completed the answer, not the one that committed
         // the first byte. Response headers ship at commit and stay
         // commit-truthful; outcome readers get outcome truth.
+        // Setters: the chain-fallback merge (client.js) adjusts attempts on a
+        // fallback-success result; getter-only fields made that assignment
+        // throw ("Cannot set property attempts") and 500 the request
+        // (live 2026-11-09, astra-budget). A set keeps the LIVE view: the
+        // counter stays the single source of truth for later splices.
         get selectedCandidate() { return served; },
+        set selectedCandidate(v) { served = v; },
         get attempts() { return attemptsUsed; },
+        set attempts(v) { attemptsUsed = v; },
         failoverErrors: errors, getMetrics
       });
     }
@@ -262,6 +278,9 @@ export function executeStreamingWithSplice({
         if (contentSeen) break;
         if (requestSignal && requestSignal.aborted) break;
         if (errors.length >= maxAttempts) break;
+        // Already-refused model: every one of its nodes answers the same 4xx.
+        // Skip without burning an attempt — later chain members need that budget.
+        if (refusedModels.has(candidate.modelId)) continue;
         // Bound the SILENT chase: until the first relayed byte the client
         // stares at nothing. A model whose every node fails slowly must not
         // burn maxAttempts x per-open latency before answering — 30s covers
@@ -288,7 +307,8 @@ export function executeStreamingWithSplice({
           if (opened.clientGone) break;
           if (NON_RETRYABLE_OPEN_STATUSES.has(opened.status)) {
             nonRetryableOpen = true;
-            break;
+            refusedModels.add(candidate.modelId);
+            continue;
           }
           continue;
         }
@@ -434,7 +454,7 @@ export function executeStreamingWithSplice({
         try { await writer.close(); } catch {}
       } else {
         fail(503, nonRetryableOpen
-          ? `Non-retryable upstream rejection (${errors[errors.length - 1]?.status || "4xx"}): every node of this model refuses identically.`
+          ? `Non-retryable upstream rejection (${errors[errors.length - 1]?.status || "4xx"}): the account refuses this model — every node answers the same 4xx.`
           : budgetCut
           ? `Pre-commit budget exhausted after ${attemptsUsed} attempts in ${Date.now() - startedAt}ms of client-facing silence.`
           : errors.length >= maxAttempts

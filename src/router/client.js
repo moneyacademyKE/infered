@@ -6,7 +6,7 @@
 
 import { recordSample, recordUsage } from "./metrics.js";
 import { getOfficialPrice, CHAIN_FALLBACKS } from "./catalog.js";
-import { executeStreamingWithSplice, DEFAULT_FIRST_BYTE_TIMEOUT_MS, DEFAULT_PRE_COMMIT_BUDGET_MS } from "./stream.js";
+import { executeStreamingWithSplice, DEFAULT_FIRST_BYTE_TIMEOUT_MS, DEFAULT_PRE_COMMIT_BUDGET_MS, NON_RETRYABLE_OPEN_STATUSES } from "./stream.js";
 
 const DEFAULT_TIMEOUT_MS = 25000;
 
@@ -134,6 +134,12 @@ export function executeWithFallback({
     }
 
     const errors = [];
+    // Same contract as the streaming path: a 4xx from upstream is an account
+    // verdict about the MODEL, not a flaky node — one refusal poisons every
+    // remaining node of that model. Without this, a disabled model's whole
+    // node list burns the retry budget one identical 403 at a time (live
+    // 2026-11-09: raw flash spent 10 fetches on 10 identical refusals).
+    const refusedModels = new Set();
 
     for (const candidate of candidates) {
       // Don't start new upstream attempts for a caller who already left,
@@ -141,6 +147,7 @@ export function executeWithFallback({
       // a long order book must not be able to burn them all on one request).
       if (requestSignal && requestSignal.aborted) break;
       if (errors.length >= maxAttempts) break;
+      if (refusedModels.has(candidate.modelId)) continue;
 
       const result = await executeCandidateRequest({
         candidate,
@@ -203,6 +210,9 @@ export function executeWithFallback({
           status: result.status,
           error: result.error
         });
+        if (NON_RETRYABLE_OPEN_STATUSES.has(result.status)) {
+          refusedModels.add(candidate.modelId);
+        }
       }
     }
 
