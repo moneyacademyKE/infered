@@ -483,4 +483,3 @@
       (is (false? (:success res)))
       (is (= 499 (:status res)))
       (is (re-find #"Client disconnected" (str (:error res)))))))
-

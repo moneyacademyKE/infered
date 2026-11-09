@@ -267,6 +267,7 @@ export async function executeWithChainFallback({ requestedModel, rank, execute }
     const fbCandidates = rank(fallbackName);
     if (fbCandidates.length > 0) {
       const primaryAttempts = result.attempts || 0;
+      const primaryErrors = result.failoverErrors || [];
       const fbResult = await execute(fbCandidates);
       if (fbResult.success) {
         result = fbResult;
@@ -274,7 +275,15 @@ export async function executeWithChainFallback({ requestedModel, rank, execute }
         fallbackChain = fallbackName;
         candidates = fbCandidates;
       } else {
-        result.fallbackTried = fallbackName;
+        // BOTH passes failed: the whole story is attempts and errors from
+        // each pass, merged — replacing the first result would silently
+        // undercount what actually happened (audit: telemetry merge).
+        result = {
+          ...fbResult,
+          attempts: primaryAttempts + (fbResult.attempts || 0),
+          failoverErrors: [...primaryErrors, ...(fbResult.failoverErrors || [])],
+          fallbackTried: fallbackName
+        };
         candidates = fbCandidates;
       }
     }
