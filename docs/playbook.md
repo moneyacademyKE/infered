@@ -68,3 +68,20 @@ bb scripts/d1-audit.bb
 bb scripts/d1-check.bb
 ```
 
+## 6. D1 Schema (migrations/0001_init.sql)
+The D1 schema is reproducible from the repo. `routing_decisions` + `session_pins`
+are byte-matched to the live database `infered-routing` (pull 2026-11-09).
+
+```bash
+# Apply to remote (idempotent — safe to re-run)
+bunx wrangler d1 execute infered-routing --remote --file migrations/0001_init.sql
+
+# Local dev copy
+bunx wrangler d1 execute infered-routing --file migrations/0001_init.sql
+```
+
+The INSERT in `src/router/telemetry.js` and the pin upsert in
+`src/router/session.js` are the code contract for that schema; change one,
+change the other, and add a new numbered migration — never a live ALTER
+without a repo-side migration beside it.
+
