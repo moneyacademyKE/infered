@@ -457,6 +457,30 @@
       (is (= 0 (:liveQuotes res)) "no live quotes until a sync succeeds")
       (is (:lastSyncRawNull res) "lastSyncRaw is null before any sync"))))
 
+(deftest test-analytics-escapes-d1-sourced-values
+  (testing "model names and error strings from D1 are HTML-escaped (stored XSS)"
+    (let [res (run-node-eval
+               "import worker from './src/worker.js';
+                import { renderAnalyticsPage } from './src/ui/analytics.js';
+                const data = {
+                  topModels: [{ model: '<script>alert(1)</script>', reqs: 3, okPct: 100, avgMs: 5, avgAttempts: 1 }],
+                  switching: { total: 3, directHits: 3, failovers: 0, escalations: 0, errors: 1, avgAttempts: 1 },
+                  flappingSessions: 0, totalSessions: 1, last24h: 3,
+                  chains: [{ chain: 'infered/<b>glm</b>', reqs: 3, okPct: 100, directHits: 3, avgAttempts: 1 }],
+                  failureClasses: [{ err: '<img src=x onerror=alert(2)>', n: 1 }],
+                  failures24h: 1,
+                  recentFailures: [{ ts: '2026-11-09', chain: '<script>c</script>', model: '<script>m</script>', error: '<script>e</script>' }]
+                };
+                const html = renderAnalyticsPage(data, null);
+                console.log(JSON.stringify({
+                  noScript: !html.includes('<script>alert'),
+                  noImgTag: !html.includes('<img src=x'),
+                  escapedLt: html.includes('&lt;script&gt;') || !html.includes('script')
+                }));")]
+      (is (:noScript res) "script tags in model names cannot reach the DOM")
+      (is (:noImgTag res) "event-handler payloads in error text are defanged")
+      (is (:escapedLt res) "raw < becomes &lt; in output"))))
+
 (deftest test-request-body-validation
   (testing "oversized bodies and malformed shapes are rejected before routing"
     (let [res (run-node-eval

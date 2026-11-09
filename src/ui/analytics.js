@@ -104,6 +104,17 @@ function check(cond) {
   return cond ? '<span class="ok">☑</span>' : '<span class="bad">☒</span>';
 }
 
+// D1 values are attacker-influenced (requested model names, upstream error
+// strings). They render as TEXT, never markup — escape at the boundary.
+function esc(v) {
+  return String(v ?? "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
 export function renderAnalyticsPage(d, ratecard = null) {
   const s = d.switching;
   const total = s.total || 0;
@@ -115,7 +126,7 @@ export function renderAnalyticsPage(d, ratecard = null) {
         const spot = r.spot;
         const live = Boolean(spot);
         const verdict = live && (spot.savingsPct ?? 0) >= 90;
-        return `<div class="item">${check(verdict)} <strong>${r.modelId}</strong>
+        return `<div class="item">${check(verdict)} <strong>${esc(r.modelId)}</strong>
          <span class="num">$${r.blended}</span>/M list · ${live
           ? `<span class="num">$${spot.blendedPrice}</span> spot · ${spot.savingsPct}% off`
           : `<span class="muted">no live asks</span>`}${r.calibrated ? "" : ` · <span class="muted">uncalibrated</span>`}</div>`;
@@ -124,7 +135,7 @@ export function renderAnalyticsPage(d, ratecard = null) {
 
   const modelRows = d.topModels.length
     ? d.topModels.map(m =>
-        `<div class="item">${check((m.okPct ?? 0) >= 95)} <strong>${m.model}</strong>
+        `<div class="item">${check((m.okPct ?? 0) >= 95)} <strong>${esc(m.model)}</strong>
          <span class="num">${m.reqs}</span> reqs · ${m.avgMs ?? "?"}ms avg · ${m.okPct ?? 0}% ok · ${m.avgAttempts ?? 1} attempts</div>`).join("")
     : `<div class="item muted">no decision rows yet — send a completion</div>`;
 
@@ -146,10 +157,10 @@ ${modelRows}
 <h2>Failure ledger</h2>
 <div class="item">${check((d.failures24h || 0) === 0)} failures in last 24h: <span class="num">${d.failures24h || 0}</span></div>
 ${(d.failureClasses || []).map(c =>
-    `<div class="item muted">↳ ${c.err}: <span class="num">${c.n}</span></div>`).join("")}
+    `<div class="item muted">↳ ${esc(c.err)}: <span class="num">${c.n}</span></div>`).join("")}
 ${(d.recentFailures || []).length
     ? d.recentFailures.map(f =>
-        `<div class="item bad">✗ ${f.ts} · ${f.chain || "?"} → ${f.model || "?"} · ${f.error || "unrecorded"}</div>`).join("")
+        `<div class="item bad">✗ ${esc(f.ts)} · ${esc(f.chain || "?")} → ${esc(f.model || "?")} · ${esc(f.error || "unrecorded")}</div>`).join("")
     : `<div class="item muted">no failure rows in the ledger</div>`}
 
 <h2>Session stickiness</h2>
@@ -158,7 +169,7 @@ ${(d.recentFailures || []).length
 <h2>Chains (requested → served)</h2>
 ${d.chains.length
     ? d.chains.map(c =>
-        `<div class="item">${check((c.okPct ?? 0) >= 95)} <strong>${c.chain}</strong>
+        `<div class="item">${check((c.okPct ?? 0) >= 95)} <strong>${esc(c.chain)}</strong>
          <span class="num">${c.reqs}</span> reqs · ${c.okPct ?? 0}% ok · ${c.directHits || 0} direct · ${c.avgAttempts ?? "–"} avg attempts</div>`).join("")
     : `<div class="item muted">no chain rows yet (pre-attribution decisions have no requested_model)</div>`}
 
