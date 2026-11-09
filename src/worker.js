@@ -9,6 +9,9 @@ import { rankCandidates, DEFAULT_WEIGHTS, ROUTING_POLICIES } from "./router/pare
 import { executeWithFallback, executeWithChainFallback } from "./router/client.js";
 import { collectAnalytics, renderAnalyticsPage } from "./ui/analytics.js";
 import { corsHeaders, jsonResponse, buildTelemetryHeaders, recordRoutingAnalytics, createStandaloneMockFetch } from "./router/telemetry.js";
+import { checkBodySize, validateChatBody, MAX_BODY_BYTES } from "./router/validate.js";
+
+const MAX_BODY_BYTES_STRING = MAX_BODY_BYTES;
 
 let globalPriceCache = null;
 let globalMetricsStore = null;
@@ -104,8 +107,20 @@ export default {
     }
 
     const { priceCache, metricsStore, cacheStore } = getOrInitState();
-    const apiKey = env?.INFERHUB_API_KEY || request.headers.get("Authorization")?.replace(/^Bearer\s+/i, "");
+    // Upstream key is the worker's own secret, full stop: a caller's
+    // Authorization is INPUT, never a credential we relay or adopt (audit H5).
+    const apiKey = env?.INFERHUB_API_KEY || null;
     const baseUrl = env?.INFERHUB_BASE_URL || "https://api.inferhub.dev/v1";
+
+    // Admin-plane auth (audit: metrics/sync were publicly readable/triggerable).
+    // Bearer must match ROUTER_AUTH_TOKEN exactly when the token is configured;
+    // an unset token keeps today's public behavior for a private deployment.
+    const adminToken = env?.ROUTER_AUTH_TOKEN || null;
+    const bearer = request.headers.get("Authorization")?.replace(/^Bearer\s+/i, "") || null;
+    const adminAuthorized = !adminToken || (bearer !== null && bearer === adminToken);
+    const requireAdmin = () => adminAuthorized
+      ? null
+      : jsonResponse({ error: { message: "Admin token required.", type: "authentication_error" } }, 401);
 
     // Continuous SWR Market Polling: Asynchronously refresh order books if stale
     triggerBackgroundSwrSyncIfNeeded(priceCache, baseUrl, apiKey, ctx);
@@ -172,6 +187,8 @@ export default {
     }
 
     if (path === "/v1/metrics" && request.method === "GET") {
+      const unauthorized = requireAdmin();
+      if (unauthorized) return unauthorized;
       const quoteList = Object.values(priceCache.quotes).map(q => {
         const stats = getProviderStats(metricsStore, q.providerId, q.modelId);
         return {
@@ -198,6 +215,11 @@ export default {
     }
 
     if (path === "/v1/admin/sync" && (request.method === "POST" || request.method === "GET")) {
+      const unauthorized = requireAdmin();
+      if (unauthorized) return unauthorized;
+      // Only the worker's OWN configured key triggers a live sync — the
+      // caller's bearer (if it matched the admin token) is a router
+      // credential, not an InferHub credential.
       if (apiKey) {
         await syncLiveInferHubQuotes(priceCache, baseUrl, apiKey);
       }
@@ -209,7 +231,22 @@ export default {
 
     if (path === "/v1/chat/completions" && request.method === "POST") {
       try {
-        let requestBody = await request.json();
+        // Bounded input before parsing: declared-size rejection, then shape.
+        const oversized = checkBodySize(request);
+        if (oversized) return oversized;
+        let requestBody;
+        try {
+          requestBody = await request.json();
+        } catch {
+          return jsonResponse({ error: { message: "Request body is not valid JSON.", type: "invalid_request_error" } }, 400);
+        }
+        if (JSON.stringify(requestBody).length > MAX_BODY_BYTES_STRING) {
+          return jsonResponse({ error: { message: "Request body exceeds the byte limit.", type: "invalid_request_error" } }, 413);
+        }
+        const shape = validateChatBody(requestBody);
+        if (!shape.ok) {
+          return jsonResponse(shape.body, shape.status);
+        }
         const requestStart = Date.now();
         // Sol removed 2026-09-05 (owner directive) — glm-budget is the default chain.
         const requestedModel = requestBody.model || "infered/glm-budget";
