@@ -1,0 +1,32 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Babashka
+        uses: turtlequeue/setup-babashka@v1.3.0
+        with:
+          babashka-version: "1.12.208"
+
+      - name: Syntax check production JS
+        run: |
+          for f in $(find src -name '*.js'); do node --check "$f" || exit 1; done
+
+      - name: Lint (LOC ceiling + policy drift guards)
+        run: bb lint
+
+      - name: Test suite
+        run: bb test-all
