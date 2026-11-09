@@ -23,7 +23,9 @@ const MODEL_SPOT_MULTIPLIERS = {
   "ali/qwen3.8-max-0902": [0.0050, 0.0060, 0.0080], // $6.00 * 0.005 = $0.03 (feed min ask, 16 asks)
   "zai/glm-5.3": [0.0400, 0.0500, 0.0600],         // $4.40 * 0.04 = $0.176 (feed min ask, 14 asks)
   "cx/gpt-6.1-terra": [0.2580, 0.2600, 0.2640],    // $5.00 * 0.258 = $1.29 (feed min ask, 2 asks — above tier-0, last-resort tier admits it)
-  "ali/kimi-k3.1-pro": [0.0190, 0.0220, 0.0260]    // $10.00 * 0.019 = $0.19 (feed min ask, 9 asks)
+  "ali/kimi-k3.1-pro": [0.0190, 0.0220, 0.0260],   // $10.00 * 0.019 = $0.19 (feed min ask, 9 asks)
+  "oai/gpt-6.1-sol": [0.0170, 0.0180, 0.0200],     // $10.00 * 0.017 = $0.17 (feed min ask)
+  "oai/gpt-6.1-terra": [0.0170, 0.0180, 0.0200]    // $5.00 * 0.017 = $0.085 (feed min ask)
 };
 
 export function createDefaultMarketQuotes() {

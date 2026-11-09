@@ -173,8 +173,8 @@ export default {
     }
 
     if (path === "/v1/models" && request.method === "GET") {
-      // Exactly two products: the budget chains. Every other name a client
-      // sends still routes (unknown → default chain) — it just isn't listed.
+      // Only declared chain products are listed. Unknown names still route to
+      // the default chain; raw catalog models remain requestable by ID.
       const virtualModels = Object.keys(VIRTUAL_ALIASES).map(alias => ({
         id: alias,
         object: "model",

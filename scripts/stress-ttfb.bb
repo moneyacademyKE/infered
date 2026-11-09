@@ -28,7 +28,7 @@
 (def max-ttfb (or (some-> (System/getenv "MAX_TTFB") parse-double) 20.0))
 
 (def chains ["infered/glm-budget" "infered/astra-budget" "infered/astra-terra"
-             "infered/terra-kimi" "infered/kimi-glm"])
+             "infered/terra-kimi" "infered/kimi-glm" "infered/solterra"])
 
 (def easy "Reply with exactly: OK")
 (def hard "In one short sentence: why does time-to-first-byte matter for streaming LLM APIs?")

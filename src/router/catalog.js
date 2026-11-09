@@ -12,6 +12,8 @@
 // directives 2026-09-22).
 export const MODEL_TIERS = {
   "cx/gpt-6.1-terra": { tier: "balanced-frontier", quality: 0.91, family: "openai", context: 500000 },
+  "oai/gpt-6.1-sol": { tier: "frontier-flagship", quality: 0.96, family: "openai", context: 1050000 },
+  "oai/gpt-6.1-terra": { tier: "balanced-frontier", quality: 0.91, family: "openai", context: 1050000 },
   "zai/glm-5.3": { tier: "agentic-coding", quality: 0.93, family: "z.ai", context: 1000000 },
   "ali/kimi-k3.1-pro": { tier: "moe-frontier", quality: 0.94, family: "moonshot", context: 1000000 },
   "ali/qwen3.8-max-0902": { tier: "frontier-flagship", quality: 0.96, family: "qwen", context: 1000000 }
@@ -29,6 +31,8 @@ export const OFFICIAL_PRICES = {
   // model_disabled on every node), so it must never be price-resolvable.
   "ali/qwen3.8-max-0902": { prompt: 2, completion: 6 },
   "cx/gpt-6.1-terra": { prompt: 1, completion: 5 },
+  "oai/gpt-6.1-sol": { prompt: 2, completion: 10 },
+  "oai/gpt-6.1-terra": { prompt: 1, completion: 5 },
   "zai/glm-5.3": { prompt: 1.40, completion: 4.40 },
   // Refreshed 2026-11-09 (owner directive): flash/terra-5.6/kimi-k3 excised;
   // 6.1-terra + kimi-k3.1-pro list prices verified against the live feed.
@@ -85,16 +89,24 @@ export const KIMI_GLM_CHAIN = [
   "ali/qwen3.8-max-0902"
 ];
 
+// Explicit two-model OpenAI cascade (owner directive 2026-11-09). Sol leads;
+// Terra is the second link, with no implicit qwen tail.
+export const SOLTERRA_CHAIN = [
+  "oai/gpt-6.1-sol",
+  "oai/gpt-6.1-terra"
+];
+
 // Virtual models that route as ordered budget cascades. Single source of truth —
 // the router detects cascade requests by lookup here, not by string comparison.
-// Five products (2026-09-08): every other name a client sends reroutes
+// Six products (2026-11-09): every other name a client sends reroutes
 // to the default budget chain.
 export const CASCADE_CHAINS = {
   "infered/glm-budget": GLM_BUDGET_FALLBACK_CHAIN,
   "infered/astra-budget": ASTRA_BUDGET_FALLBACK_CHAIN,
   "infered/astra-terra": ASTRA_TERRA_CHAIN,
   "infered/terra-kimi": TERRA_KIMI_CHAIN,
-  "infered/kimi-glm": KIMI_GLM_CHAIN
+  "infered/kimi-glm": KIMI_GLM_CHAIN,
+  "infered/solterra": SOLTERRA_CHAIN
 };
 
 // Default requested model — also where UNRECOGNIZED names land (typos like
@@ -116,7 +128,8 @@ export const CHAIN_STRONG_LINKS = {
   "infered/astra-budget": "cx/gpt-6-astra",
   "infered/astra-terra": "cx/gpt-6-astra",
   "infered/terra-kimi": "ali/kimi-k3.1-pro",
-  "infered/kimi-glm": "ali/qwen3.8-max-0902"
+  "infered/kimi-glm": "ali/qwen3.8-max-0902",
+  "infered/solterra": "oai/gpt-6.1-sol"
 };
 
 // Mirrors the cascade resolution rule (CASCADE_CHAINS hit, else default chain)

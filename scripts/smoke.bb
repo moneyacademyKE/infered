@@ -28,15 +28,16 @@
   (probe! "health-200" (map? h) (str (:status h)))
   (probe! "health-market-block" (contains? h :market) (pr-str (:market h))))
 
-;; 2. /v1/models — exactly the five chain products
+;; 2. /v1/models — exactly the six chain products
 (let [m (sh-json (str base "/v1/models") [])
       ids (mapv :id (get m :data))]
-  (probe! "models-five-chains"
+  (probe! "models-six-chains"
           (and (contains? (set ids) "infered/glm-budget")
                (contains? (set ids) "infered/astra-budget")
                (contains? (set ids) "infered/astra-terra")
                (contains? (set ids) "infered/terra-kimi")
-               (contains? (set ids) "infered/kimi-glm"))
+               (contains? (set ids) "infered/kimi-glm")
+               (contains? (set ids) "infered/solterra"))
           (pr-str ids)))
 
 ;; 3. /v1/metrics — 401 WITHOUT auth when token configured; skip if open

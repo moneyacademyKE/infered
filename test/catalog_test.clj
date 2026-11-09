@@ -215,3 +215,28 @@
       (is (:hasTier res) "MODEL_TIERS entry required for raw resolution")
       (is (:hasPrice res) "OFFICIAL_PRICES entry required for pricing/savings"))))
 
+(deftest test-solterra-chain
+  (testing "solterra resolves to the exact oai Sol then Terra cascade with verified prices and strong head"
+    (let [res (run-node-eval
+               "import { resolveVirtualModel, resolveStrongLink, OFFICIAL_PRICES, MODEL_TIERS, CASCADE_CHAINS } from './src/router/catalog.js';
+                console.log(JSON.stringify({
+                  resolved: resolveVirtualModel('infered/solterra'),
+                  strong: resolveStrongLink('infered/solterra'),
+                  registered: Boolean(CASCADE_CHAINS['infered/solterra']),
+                  solRaw: resolveVirtualModel('oai/gpt-6.1-sol'),
+                  terraRaw: resolveVirtualModel('oai/gpt-6.1-terra'),
+                  solPrice: OFFICIAL_PRICES['oai/gpt-6.1-sol'],
+                  terraPrice: OFFICIAL_PRICES['oai/gpt-6.1-terra'],
+                  solContext: MODEL_TIERS['oai/gpt-6.1-sol']?.context,
+                  terraContext: MODEL_TIERS['oai/gpt-6.1-terra']?.context
+                }));")]
+      (is (= ["oai/gpt-6.1-sol" "oai/gpt-6.1-terra"] (:resolved res)))
+      (is (= "oai/gpt-6.1-sol" (:strong res)))
+      (is (:registered res))
+      (is (= ["oai/gpt-6.1-sol"] (:solRaw res)))
+      (is (= ["oai/gpt-6.1-terra"] (:terraRaw res)))
+      (is (= {:prompt 2 :completion 10} (:solPrice res)))
+      (is (= {:prompt 1 :completion 5} (:terraPrice res)))
+      (is (= 1050000 (:solContext res)))
+      (is (= 1050000 (:terraContext res))))))
+
