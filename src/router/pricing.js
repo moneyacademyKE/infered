@@ -17,14 +17,13 @@ export function calculateBlendedPrice(promptPrice, completionPrice) {
  */
 const MODEL_SPOT_MULTIPLIERS = {
   // Ratios of official completion price. Seeded min asks match the live
-  // InferHub book (deadname-audit prober snapshot 2026-09-23).
+  // InferHub book (feed snapshot 2026-11-09).
   "cx/gpt-6-astra": [0.0190, 0.0250, 0.0300],      // $50.00 * 0.019 = $0.95 (feed min ask, 29 asks)
   "ali/glm-5.3": [0.0300, 0.0350, 0.0400],         // $4.40 * 0.03 = $0.132 (feed min ask, 7 asks)
-  "ali/qwen3.8-max-0902": [0.0050, 0.0060, 0.0080], // $6.00 * 0.005 = $0.03 (feed min ask, 11 asks)
-  "zai/glm-5.3-flash": [0.0990, 0.1100, 0.1300],   // $0.50 * 0.099 = $0.0495 (feed min ask, 9 asks)
-  "zai/glm-5.3": [0.0400, 0.0500, 0.0600],         // $4.40 * 0.04 = $0.176 (feed min ask, 10 asks)
-  "cx/gpt-5.6-terra": [0.0010, 0.0012, 0.0015],    // $12.00 * 0.001 = $0.012 (feed min ask, 24 asks)
-  "ali/kimi-k3": [0.0230, 0.0260, 0.0300]          // $15.00 * 0.023 = $0.345 (feed min ask, 8 asks)
+  "ali/qwen3.8-max-0902": [0.0050, 0.0060, 0.0080], // $6.00 * 0.005 = $0.03 (feed min ask, 16 asks)
+  "zai/glm-5.3": [0.0400, 0.0500, 0.0600],         // $4.40 * 0.04 = $0.176 (feed min ask, 14 asks)
+  "cx/gpt-6.1-terra": [0.2580, 0.2600, 0.2640],    // $5.00 * 0.258 = $1.29 (feed min ask, 2 asks — above tier-0, last-resort tier admits it)
+  "ali/kimi-k3.1-pro": [0.0190, 0.0220, 0.0260]    // $10.00 * 0.019 = $0.19 (feed min ask, 9 asks)
 };
 
 export function createDefaultMarketQuotes() {

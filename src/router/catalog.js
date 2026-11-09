@@ -11,10 +11,9 @@
 // (qwen3.8-max-0902 raw registration + unsuffixed qwen excision: owner
 // directives 2026-09-22).
 export const MODEL_TIERS = {
-  "cx/gpt-5.6-terra": { tier: "balanced-frontier", quality: 0.91, family: "openai", context: 128000 },
+  "cx/gpt-6.1-terra": { tier: "balanced-frontier", quality: 0.91, family: "openai", context: 500000 },
   "zai/glm-5.3": { tier: "agentic-coding", quality: 0.93, family: "z.ai", context: 1000000 },
-  "zai/glm-5.3-flash": { tier: "fast-agentic", quality: 0.85, family: "z.ai", context: 1000000 },
-  "ali/kimi-k3": { tier: "moe-frontier", quality: 0.94, family: "moonshot", context: 1000000 },
+  "ali/kimi-k3.1-pro": { tier: "moe-frontier", quality: 0.94, family: "moonshot", context: 1000000 },
   "ali/qwen3.8-max-0902": { tier: "frontier-flagship", quality: 0.96, family: "qwen", context: 1000000 }
 };
 
@@ -29,32 +28,33 @@ export const OFFICIAL_PRICES = {
   // ali/qwen3.8-max was excised the same day: disabled upstream (403
   // model_disabled on every node), so it must never be price-resolvable.
   "ali/qwen3.8-max-0902": { prompt: 2, completion: 6 },
-  "cx/gpt-5.6-terra": { prompt: 2, completion: 12 },
+  "cx/gpt-6.1-terra": { prompt: 1, completion: 5 },
   "zai/glm-5.3": { prompt: 1.40, completion: 4.40 },
-  "zai/glm-5.3-flash": { prompt: 0.15, completion: 0.5 },
-  "ali/kimi-k3": { prompt: 3, completion: 15 }
+  // Refreshed 2026-11-09 (owner directive): flash/terra-5.6/kimi-k3 excised;
+  // 6.1-terra + kimi-k3.1-pro list prices verified against the live feed.
+  "ali/kimi-k3.1-pro": { prompt: 2, completion: 10 }
 };
 
-// Budget cascade ordering (sol removed 2026-09-05 per owner directive —
-// upstream no_capacity made it a liability). ali/glm-5.3 leads since
-// 2026-09-15 (owner directive): verified quotable on InferHub with min spot
-// ask $0.0352/M output — under the $0.50 tier-0 ceiling, so the head truly serves.
+// Budget cascade ordering (sol removed 2026-09-05; flash/terra-5.6/kimi-k3
+// excised 2026-11-09 — owner directives). ali/glm-5.3 leads (min spot ask
+// $0.0352/M output, under the $0.50 tier-0 ceiling); qwen-0902 is every
+// chain's tail (owner directive 2026-11-09).
 export const GLM_BUDGET_FALLBACK_CHAIN = [
   "ali/glm-5.3",
-  "zai/glm-5.3-flash",
   "zai/glm-5.3",
-  "ali/kimi-k3",
-  "cx/gpt-5.6-terra"
+  "ali/kimi-k3.1-pro",
+  "cx/gpt-6.1-terra",
+  "ali/qwen3.8-max-0902"
 ];
 
 // Astra-headed budget cascade: the head activates automatically once
 // cx/gpt-6-astra lists live spot asks on InferHub (eligibility skips
-// unquoted models, so flash/kimi carry traffic until then). The head is
+// unquoted models, so kimi-3.1-pro carries traffic until then). The head is
 // price-exempt (see CEILING_EXEMPT_MODELS): its ask can never disqualify it.
 export const ASTRA_BUDGET_FALLBACK_CHAIN = [
   "cx/gpt-6-astra",
-  "zai/glm-5.3-flash",
-  "ali/kimi-k3"
+  "ali/kimi-k3.1-pro",
+  "ali/qwen3.8-max-0902"
 ];
 
 // Models exempt from the output-price CEILING: any ask price is acceptable.
@@ -66,23 +66,22 @@ export const CEILING_EXEMPT_MODELS = ["cx/gpt-6-astra"];
 // kimi-glm. Same budget-cascade mechanics as the -budget products.
 export const ASTRA_TERRA_CHAIN = [
   "cx/gpt-6-astra",
-  "cx/gpt-5.6-terra",
-  "ali/kimi-k3",
-  "zai/glm-5.3-flash"
+  "cx/gpt-6.1-terra",
+  "ali/kimi-k3.1-pro",
+  "ali/qwen3.8-max-0902"
 ];
 
 export const TERRA_KIMI_CHAIN = [
-  "cx/gpt-5.6-terra",
-  "ali/kimi-k3",
-  "zai/glm-5.3-flash"
+  "cx/gpt-6.1-terra",
+  "ali/kimi-k3.1-pro",
+  "ali/qwen3.8-max-0902"
 ];
 
-// kimi-glm tail swapped 2026-09-22 (owner correction): the unsuffixed
-// ali/qwen3.8-max is disabled upstream (403 model_disabled on every node);
-// the dated -0902 snapshot is the enabled model the owner requested.
+// kimi-glm rides the pro reasoner; the qwen tail is the enabled -0902
+// snapshot (its unsuffixed sibling is disabled upstream — 2026-09-22
+// owner correction).
 export const KIMI_GLM_CHAIN = [
-  "ali/kimi-k3",
-  "zai/glm-5.3-flash",
+  "ali/kimi-k3.1-pro",
   "ali/qwen3.8-max-0902"
 ];
 
@@ -107,16 +106,16 @@ export const DEFAULT_MODEL = "infered/glm-budget";
 // Designated strong link per chain — where X-Infered-Tier: strong starts the
 // cascade. Chains are ECONOMIC orderings (head = preferred under spot prices),
 // so the strong link is an explicit capability pick, not a position guess:
-// kimi-k3 scores highest in MODEL_TIERS (0.94); qwen3.8-max-0902 is
+// kimi-k3.1-pro carries glm-budget/terra-kimi's strong link; qwen3.8-max-0902 is
 // kimi-glm's big-gun tail (the enabled snapshot — its unsuffixed sibling
 // is disabled upstream, so strong must never start there); the astra
 // heads are already their chains' premium play (a strong start there is
 // a graceful no-op over the full chain).
 export const CHAIN_STRONG_LINKS = {
-  "infered/glm-budget": "ali/kimi-k3",
+  "infered/glm-budget": "ali/kimi-k3.1-pro",
   "infered/astra-budget": "cx/gpt-6-astra",
   "infered/astra-terra": "cx/gpt-6-astra",
-  "infered/terra-kimi": "ali/kimi-k3",
+  "infered/terra-kimi": "ali/kimi-k3.1-pro",
   "infered/kimi-glm": "ali/qwen3.8-max-0902"
 };
 

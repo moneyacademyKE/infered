@@ -25,10 +25,9 @@
       (is (:hasAliases res))
       (is (vector? (:autoModels res)))
       (is (> (count (:autoModels res)) 0))
-      ;; sol removed 2026-09-05: sol-budget resolves to the glm-budget chain,
-      ;; and raw-sol requests fall through to the sol-free auto cascade.
-      ;; ali/glm-5.3 leads the chain since 2026-09-15 (owner directive).
-      (is (= ["ali/glm-5.3", "zai/glm-5.3-flash", "zai/glm-5.3", "ali/kimi-k3", "cx/gpt-5.6-terra"]
+      ;; sol removed 2026-09-05; flash/terra-5.6/kimi-k3 excised 2026-11-09
+      ;; (owner directives). ali/glm-5.3 leads; qwen-0902 is the tail.
+      (is (= ["ali/glm-5.3", "zai/glm-5.3", "ali/kimi-k3.1-pro", "cx/gpt-6.1-terra", "ali/qwen3.8-max-0902"]
              (:cascadeModels res)))
       (is (not-any? #(= "cx/gpt-5.6-sol" %) (:solExact res))
           "removed sol must resolve to a sol-free fallback, never to itself"))))
@@ -39,10 +38,10 @@
                "import { getOfficialPrice, OFFICIAL_PRICES } from './src/router/catalog.js';
                 console.log(JSON.stringify({
                   solPrice: getOfficialPrice('cx/gpt-5.6-sol'),
-                  glmFlashPrice: getOfficialPrice('zai/glm-5.3-flash'),
                   aliGlmPrice: getOfficialPrice('ali/glm-5.3'),
-                  kimiPrice: getOfficialPrice('ali/kimi-k3'),
-                  terraPrice: getOfficialPrice('cx/gpt-5.6-terra'),
+                  kimi31Price: getOfficialPrice('ali/kimi-k3.1-pro'),
+                  terra61Price: getOfficialPrice('cx/gpt-6.1-terra'),
+                  flashRemoved: getOfficialPrice('zai/glm-5.3-flash'),
                   hasPrices: Object.keys(OFFICIAL_PRICES).length >= 4
                 }));")]
       (is (:hasPrices res))
@@ -53,9 +52,12 @@
       ;; listing from zai-hosted glm-5.3 ($0.20/$0.40).
       (is (= 1.4 (get-in res [:aliGlmPrice :prompt])))
       (is (= 4.4 (get-in res [:aliGlmPrice :completion])))
-      (is (> (get-in res [:glmFlashPrice :prompt]) 0))
-      (is (> (get-in res [:kimiPrice :prompt]) 0))
-      (is (> (get-in res [:terraPrice :prompt]) 0)))))
+      (is (= 2 (get-in res [:kimi31Price :prompt]))
+          "kimi-k3.1-pro official list 2/10 per the live feed")
+      (is (= 1 (get-in res [:terra61Price :prompt]))
+          "gpt-6.1-terra official list 1/5 per the live feed")
+      (is (= 1 (get-in res [:flashRemoved :prompt]))
+          "excised flash falls to the generic $1/$2 baseline, never a real price"))))
 
 (deftest test-glm-budget-chain
   (testing "glm-budget resolves to the sol-excluded cascade chain and is listed as a virtual model"
@@ -67,17 +69,19 @@
                   cascadeLookup: Boolean(CASCADE_CHAINS['infered/glm-budget']),
                   solBudgetStillReroutes: resolveVirtualModel('infered/sol-budget')
                 }));")]
-      (is (= ["ali/glm-5.3", "zai/glm-5.3-flash", "zai/glm-5.3", "ali/kimi-k3", "cx/gpt-5.6-terra"]
+      (is (= ["ali/glm-5.3", "zai/glm-5.3", "ali/kimi-k3.1-pro", "cx/gpt-6.1-terra", "ali/qwen3.8-max-0902"]
              (:glmBudgetModels res)))
       (is (not-any? #(= "cx/gpt-5.6-sol" %) (:glmBudgetModels res))
           "glm-budget must never include sol")
+      (is (not-any? #(= "zai/glm-5.3-flash" %) (:glmBudgetModels res))
+          "flash excised 2026-11-09 (owner directive): never in any chain")
       (is (:isListed res) "must appear in VIRTUAL_ALIASES (drives /v1/models)")
       (is (:cascadeLookup res) "must be a registered cascade chain")
       ;; slimmed 2026-09-05: sol names left the listing but old callers still
       ;; reroute to the glm-budget chain instead of erroring
-      (is (= ["ali/glm-5.3", "zai/glm-5.3-flash", "zai/glm-5.3", "ali/kimi-k3", "cx/gpt-5.6-terra"]
+      (is (= ["ali/glm-5.3", "zai/glm-5.3", "ali/kimi-k3.1-pro", "cx/gpt-6.1-terra", "ali/qwen3.8-max-0902"]
              (:solBudgetStillReroutes res))
-          "legacy sol-budget callers reroute to the glm-budget chain"))))
+          "legacy sol-budget callers reroute to the glm-budget chain (flash-free since 2026-11-09)"))))
 
 (deftest test-astra-budget-chain
   (testing "astra-budget resolves to the astra-headed chain; gm5.3 typo must never appear"
@@ -90,7 +94,7 @@
                   glmBudgetStillListed: Boolean(VIRTUAL_ALIASES['infered/glm-budget']),
                   ceilingExempt: CEILING_EXEMPT_MODELS
                 }));")]
-      (is (= ["cx/gpt-6-astra", "zai/glm-5.3-flash", "ali/kimi-k3"]
+      (is (= ["cx/gpt-6-astra", "ali/kimi-k3.1-pro", "ali/qwen3.8-max-0902"]
              (:astraBudgetModels res)))
       (is (= ["cx/gpt-6-astra"] (:ceilingExempt res))
           "astra head is price-exempt: no output ceiling can disqualify it")
@@ -108,18 +112,30 @@
                   gm53Typo: resolveVirtualModel('zai/gm5.3'),
                   rawSol: resolveVirtualModel('cx/gpt-5.6-sol'),
                   removedPinned: resolveVirtualModel('infered/claude-3.5-sonnet'),
-                  chainMemberDirect: resolveVirtualModel('zai/glm-5.3-flash')
+                  removedFlash: resolveVirtualModel('zai/glm-5.3-flash'),
+                  removedTerra: resolveVirtualModel('cx/gpt-5.6-terra'),
+                  removedKimi: resolveVirtualModel('ali/kimi-k3'),
+                  chainMemberDirect: resolveVirtualModel('cx/gpt-6.1-terra')
                 }));")]
       ;; bind-order note: the default chain is glm-budget's five-model cascade
-      (is (= ["ali/glm-5.3" "zai/glm-5.3-flash" "zai/glm-5.3" "ali/kimi-k3" "cx/gpt-5.6-terra"]
+      (is (= ["ali/glm-5.3" "zai/glm-5.3" "ali/kimi-k3.1-pro" "cx/gpt-6.1-terra" "ali/qwen3.8-max-0902"]
              (:gm53Typo res))
           "the famous gm5.3 typo must land on the budget chain")
       (is (not-any? #(= "cx/gpt-5.6-sol" %) (:rawSol res))
           "raw sol resolves to a sol-free chain")
       (is (not-any? #(= "claude-3.5-sonnet" %) (:removedPinned res))
           "removed pinned virtuals reroute to the budget chain")
-      (is (= ["zai/glm-5.3-flash"] (:chainMemberDirect res))
-          "chain members stay directly addressable (they are the chains)"))))
+      (is (= ["cx/gpt-6.1-terra"] (:chainMemberDirect res))
+          "current chain members stay directly addressable (they are the chains)")
+      (is (= ["ali/glm-5.3" "zai/glm-5.3" "ali/kimi-k3.1-pro" "cx/gpt-6.1-terra" "ali/qwen3.8-max-0902"]
+             (:removedFlash res))
+          "excised flash falls to the default chain (never 403-chases the dead pool)")
+      (is (= ["ali/glm-5.3" "zai/glm-5.3" "ali/kimi-k3.1-pro" "cx/gpt-6.1-terra" "ali/qwen3.8-max-0902"]
+             (:removedTerra res))
+          "excised terra-5.6 falls to the default chain")
+      (is (= ["ali/glm-5.3" "zai/glm-5.3" "ali/kimi-k3.1-pro" "cx/gpt-6.1-terra" "ali/qwen3.8-max-0902"]
+             (:removedKimi res))
+          "excised kimi-k3 falls to the default chain"))))
 
 (deftest test-three-new-chains
   (testing "astra-terra, terra-kimi, kimi-glm resolve to their exact ordered chains"
@@ -131,12 +147,12 @@
                   kimiGlm: resolveVirtualModel('infered/kimi-glm'),
                   registered: ['infered/astra-terra','infered/terra-kimi','infered/kimi-glm'].every(k => Boolean(CASCADE_CHAINS[k] && VIRTUAL_ALIASES[k]))
                 }));")]
-      (is (= ["cx/gpt-6-astra" "cx/gpt-5.6-terra" "ali/kimi-k3" "zai/glm-5.3-flash"]
+      (is (= ["cx/gpt-6-astra" "cx/gpt-6.1-terra" "ali/kimi-k3.1-pro" "ali/qwen3.8-max-0902"]
              (:astraTerra res)))
-      (is (= ["cx/gpt-5.6-terra" "ali/kimi-k3" "zai/glm-5.3-flash"]
+      (is (= ["cx/gpt-6.1-terra" "ali/kimi-k3.1-pro" "ali/qwen3.8-max-0902"]
              (:terraKimi res)))
-      (is (= ["ali/kimi-k3" "zai/glm-5.3-flash" "ali/qwen3.8-max-0902"]
-             (:kimiGlm res)) "the enabled -0902 snapshot is the kimi-glm tail; unsuffixed sibling is disabled upstream")
+      (is (= ["ali/kimi-k3.1-pro" "ali/qwen3.8-max-0902"]
+             (:kimiGlm res)) "kimi-glm rides the pro reasoner with the enabled qwen tail")
       (is (:registered res) "all three registered in CASCADE_CHAINS and VIRTUAL_ALIASES"))))
 
 (deftest test-strong-links
@@ -152,13 +168,13 @@
                   unknownName: resolveStrongLink('zai/gm5.3'),
                   empty: resolveStrongLink('')
                 }));")]
-      (is (= "ali/kimi-k3" (:glmBudget res)) "highest-quality catalog model carries glm-budget's strong link")
+      (is (= "ali/kimi-k3.1-pro" (:glmBudget res)) "the pro reasoner carries glm-budget's strong link")
       (is (= "cx/gpt-6-astra" (:astraBudget res)) "the premium head IS astra-budget's strong link")
       (is (= "cx/gpt-6-astra" (:astraTerra res)))
-      (is (= "ali/kimi-k3" (:terraKimi res)))
+      (is (= "ali/kimi-k3.1-pro" (:terraKimi res)))
       (is (= "ali/qwen3.8-max-0902" (:kimiGlm res)) "the enabled big-gun tail is kimi-glm's strong link")
-      (is (= "ali/kimi-k3" (:unknownName res)) "unrecognized names inherit the default chain's strong link")
-      (is (= "ali/kimi-k3" (:empty res))))))
+      (is (= "ali/kimi-k3.1-pro" (:unknownName res)) "unrecognized names inherit the default chain's strong link")
+      (is (= "ali/kimi-k3.1-pro" (:empty res))))))
 
 (deftest test-qwen-metadata
   (testing "unsuffixed ali/qwen3.8-max is excised (disabled upstream); the -0902 snapshot is the registered qwen"
@@ -175,7 +191,7 @@
                 }));")]
       (is (not (:hasTier res)) "unsuffixed qwen must not be registered for raw resolution")
       (is (not (:hasPrice res)) "no official price entry — excised, not dormant")
-      (is (= ["ali/glm-5.3" "zai/glm-5.3-flash" "zai/glm-5.3" "ali/kimi-k3" "cx/gpt-5.6-terra"]
+      (is (= ["ali/glm-5.3" "zai/glm-5.3" "ali/kimi-k3.1-pro" "cx/gpt-6.1-terra" "ali/qwen3.8-max-0902"]
              (:resolved res))
           "excised names fall to the default budget chain (Sol precedent), never 403-chase the dead pool")
       (is (= 1 (get-in res [:price :prompt]))

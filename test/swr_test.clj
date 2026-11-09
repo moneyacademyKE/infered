@@ -29,7 +29,8 @@
                   maxFallbackPrice: 0.50
                 });
 
-                // User tightens threshold to 0.10 -> head's $0.132 > $0.10 -> must switch to Flash ($0.0495)
+                // User tightens threshold to 0.10 -> head's $0.132 > $0.10 and every
+                // mid link is pricier -> only the qwen tail ($0.03) qualifies
                 const candTight = rankCandidates({
                   model: 'infered/sol-budget',
                   priceCache,
@@ -63,6 +64,7 @@
       ;; the sol fixture asks are invisible to sol-budget, so the head wins at
       ;; the tier-0 ceiling; only a 0.10 ceiling drops below its $0.132 ask.
       (is (= "ali/glm-5.3" (:defaultModel res)))
-      (is (= "zai/glm-5.3-flash" (:tightModel res)))
+      (is (= "ali/qwen3.8-max-0902" (:tightModel res))
+          "0.10 ceiling skips glm/zai/kimi asks; the qwen tail ($0.03) carries it")
       (is (= "ali/glm-5.3" (:afterSpikeModel res)))
       (is (<= (:afterSpikePrice res) 0.50)))))

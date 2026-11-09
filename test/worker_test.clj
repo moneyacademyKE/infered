@@ -103,7 +103,7 @@
                   homeStatus: homeRes.status,
                   homeIsAnalytics: homeHtml.includes('infered routing analytics'),
                   homeHasPrices: homeHtml.includes('live spot'),
-                  homeHasRatecardRow: homeHtml.includes('gpt-5.6-terra'),
+                  homeHasRatecardRow: homeHtml.includes('gpt-6.1-terra'),
                   homeHasNoSol: !homeHtml.includes('gpt-5.6-sol'),
                   homeHasDollar: homeHtml.includes('$'),
                   homeHasFailureLedger: homeHtml.includes('Failure ledger'),
@@ -350,8 +350,8 @@
                   bogusSelected: bogusRes.headers.get('x-infered-selected-model'),
                   strongStatus: strongRes.status
                 }));")]
-      (is (= "ali/kimi-k3" (:strongSelected res))
-          "glm-budget's strong link is kimi — flash/glm are skipped")
+      (is (= "ali/kimi-k3.1-pro" (:strongSelected res))
+          "glm-budget's strong link is kimi-k3.1-pro — glm/qwen are skipped")
       (is (= "ali/glm-5.3" (:defaultSelected res))
           "no tier header keeps the budget head (ali/glm-5.3 leads since 2026-09-15)")
       (is (= "ali/glm-5.3" (:bogusSelected res))

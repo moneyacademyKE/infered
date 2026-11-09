@@ -17,25 +17,27 @@
                 const blended = calculateBlendedPrice(0.01, 0.06);
                 const cache = createPriceCache();
 
-                const flashQuotes = getQuotesForModel(cache, 'zai/glm-5.3-flash');
                 const glmQuotes = getQuotesForModel(cache, 'zai/glm-5.3');
-                const terraQuotes = getQuotesForModel(cache, 'cx/gpt-5.6-terra');
-                const kimiQuotes = getQuotesForModel(cache, 'ali/kimi-k3');
+                const kimi31Quotes = getQuotesForModel(cache, 'ali/kimi-k3.1-pro');
+                const terra61Quotes = getQuotesForModel(cache, 'cx/gpt-6.1-terra');
+                const qwenQuotes = getQuotesForModel(cache, 'ali/qwen3.8-max-0902');
 
                 console.log(JSON.stringify({
                   blended,
-                  flashOutput: flashQuotes[0].completion,
                   glmOutput: glmQuotes[0].completion,
-                  terraOutput: terraQuotes[0].completion,
-                  kimiOutput: kimiQuotes[0].completion,
-                  allUnderFiftyCents: [flashQuotes[0], glmQuotes[0], terraQuotes[0], kimiQuotes[0]].every(q => q.completion <= 0.50)
+                  kimi31Output: kimi31Quotes[0].completion,
+                  terra61Output: terra61Quotes[0].completion,
+                  qwenOutput: qwenQuotes[0].completion,
+                  budgetMembersUnderFiftyCents: [glmQuotes[0], kimi31Quotes[0], qwenQuotes[0]].every(q => q.completion <= 0.50)
                 }));")]
       (is (= 0.0475 (:blended res)))
-      (is (<= (:flashOutput res) 0.50))
       (is (<= (:glmOutput res) 0.50))
-      (is (<= (:terraOutput res) 0.50))
-      (is (<= (:kimiOutput res) 0.50))
-      (is (:allUnderFiftyCents res)))))
+      (is (<= (:kimi31Output res) 0.50))
+      (is (<= (:qwenOutput res) 0.50))
+      (is (true? (:budgetMembersUnderFiftyCents res))
+          "glm/kimi-3.1-pro/qwen seeded asks sit under the tier-0 ceiling")
+      (is (> (:terra61Output res) 0.50)
+          "6.1-terra trades above tier-0 ($1.29 seed mirrors the live book); only the last-resort tier admits it"))))
 
 (deftest test-inferhub-orderbook-ingestion
   (testing "Parses live asks_in and asks_out from InferHub models response"
@@ -80,12 +82,13 @@
                 import { OFFICIAL_PRICES } from './src/router/catalog.js';
 
                 const rc = buildRatecard();
-                const terra = rc.find(r => r.modelId === 'cx/gpt-5.6-terra');
-                const kimi = rc.find(r => r.modelId === 'ali/kimi-k3');
+                const terra = rc.find(r => r.modelId === 'cx/gpt-6.1-terra');
+                const kimi = rc.find(r => r.modelId === 'ali/kimi-k3.1-pro');
                 console.log(JSON.stringify({
                   count: rc.length,
                   officialCount: Object.keys(OFFICIAL_PRICES).length,
                   solAbsent: !rc.some(r => r.modelId === 'cx/gpt-5.6-sol'),
+                  flashAbsent: !rc.some(r => r.modelId === 'zai/glm-5.3-flash'),
                   terraPresent: Boolean(terra),
                   terraCalibrated: terra ? terra.calibrated === true : null,
                   terraBlendedConsistent: terra ? terra.blended === calculateBlendedPrice(terra.prompt, terra.completion) : null,
@@ -95,6 +98,7 @@
                 }));")]
       (is (= (:count res) (:officialCount res)) "ratecard must cover every official model")
       (is (true? (:solAbsent res)) "removed sol must not appear in the ratecard")
+      (is (true? (:flashAbsent res)) "excised flash must not appear in the ratecard")
       (is (true? (:terraPresent res)))
       (is (true? (:terraCalibrated res)) "terra has a calibrated multiplier")
       (is (true? (:terraBlendedConsistent res)))

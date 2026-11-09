@@ -72,7 +72,7 @@ export function createStandaloneMockFetch() {
   return async (url, opts) => {
     const body = JSON.parse(opts.body || "{}");
     const prov = opts.headers["X-InferHub-Provider"] || "mock-node";
-    const model = body.model || "zai/glm-5.3-flash";
+    const model = body.model || "ali/glm-5.3";
     const prompt = body.messages?.[body.messages.length - 1]?.content || "Hello";
     return jsonResponse({
       id: `chatcmpl-${Date.now()}`,
