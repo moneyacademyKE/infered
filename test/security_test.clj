@@ -102,9 +102,9 @@
                 const badShapeJson = await badShape.json().catch(() => ({}));
                 const badMsg = await worker.fetch(mkReq(JSON.stringify({ model: 'infered/glm-budget', messages: [{}] })), env, ctx);
                 const badMsgJson = await badMsg.json().catch(() => ({}));
-                const manyMsgs = Array.from({ length: 600 }, () => ({ role: 'user', content: 'hi' }));
+                const manyMsgs = Array.from({ length: 1100 }, () => ({ role: 'user', content: 'hi' }));
                 const manyRes = await worker.fetch(mkReq(JSON.stringify({ model: 'infered/glm-budget', messages: manyMsgs })), env, ctx);
-                const deepSession = Array.from({ length: 130 }, () => ({ role: 'user', content: 'hi' }));
+                const deepSession = Array.from({ length: 555 }, () => ({ role: 'user', content: 'hi' }));
                 const deepRes = await worker.fetch(mkReq(JSON.stringify({ model: 'infered/glm-budget', messages: deepSession })), env, ctx);
                 const ok = await worker.fetch(mkReq(JSON.stringify({ model: 'infered/glm-budget', messages: [{ role: 'user', content: 'valid' }] })), env, ctx);
                 console.log(JSON.stringify({
@@ -118,8 +118,8 @@
       (is (= "invalid_request_error" (:badShapeType res)))
       (is (= 400 (:badMsgStatus res)) "each message needs role and content")
       (is (= "invalid_request_error" (:badMsgType res)))
-      (is (= 400 (:manyStatus res)) "message count over the cap is rejected (600 > 512)")
-      (is (= 200 (:deepStatus res)) "deep agent sessions with 130+ messages route (2026-11-09 fallback incident)")
+      (is (= 400 (:manyStatus res)) "message count over the cap is rejected (1100 > 1024)")
+      (is (= 200 (:deepStatus res)) "real 555-message agent sessions route (2026-11-09 fallback incident)")
       (is (= 200 (:okStatus res)) "valid minimal requests still route"))))
 
 (deftest test-health-distinguishes-seeded-from-live-market
