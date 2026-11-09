@@ -436,6 +436,27 @@
       (is (= "Bearer sk-worker-own" (:withKeyAuth res))
           "when the worker has its own key, upstream sees the worker's key — never the caller's"))))
 
+(deftest test-health-distinguishes-seeded-from-live-market
+  (testing "health reports market live/seeded state honestly, not synthetic capacity as truth"
+    (let [res (run-node-eval
+               "import worker from './src/worker.js';
+                const env = { INFERHUB_BASE_URL: 'https://api.inferhub.net/v1' };
+                const ctx = { waitUntil: () => {} };
+                const h = await (await worker.fetch(new Request('https://edge.infered.ai/v1/health'), env, ctx)).json();
+                console.log(JSON.stringify({
+                  hasMarket: 'market' in h,
+                  marketLive: h.market ? h.market.live : null,
+                  seededQuotes: h.market ? h.market.seededQuotes : null,
+                  liveQuotes: h.market ? h.market.liveQuotes : null,
+                  lastSyncRawNull: h.lastSyncRaw === null,
+                  cachedQuotes: h.cachedQuotes
+                }));")]
+      (is (:hasMarket res) "health carries a market block")
+      (is (false? (:marketLive res)) "a fresh isolate with no successful sync is NOT live")
+      (is (> (:seededQuotes res) 0) "synthetic seeds are counted as seeded, not as cached capacity")
+      (is (= 0 (:liveQuotes res)) "no live quotes until a sync succeeds")
+      (is (:lastSyncRawNull res) "lastSyncRaw is null before any sync"))))
+
 (deftest test-request-body-validation
   (testing "oversized bodies and malformed shapes are rejected before routing"
     (let [res (run-node-eval

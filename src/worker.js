@@ -1,7 +1,7 @@
 /** Infered — dynamic virtual LLM router for the InferHub spot marketplace. */
 
 import { VIRTUAL_ALIASES, CASCADE_CHAINS, resolveStrongLink } from "./router/catalog.js";
-import { createPriceCache, updateSpotPrices, calculateSavingsPct, ingestInferHubModelsResponse, buildRatecard, getQuotesForModel } from "./router/pricing.js";
+import { createPriceCache, updateSpotPrices, calculateSavingsPct, ingestInferHubModelsResponse, buildRatecard, getQuotesForModel, getMarketState } from "./router/pricing.js";
 import { createMetricsStore, getProviderStats, getUsageSummary } from "./router/metrics.js";
 import { createCacheStore, computeRequestKey, getCachedResponse, putCachedResponse } from "./router/cache.js";
 import { resolveSessionId, getSessionPin, recordSessionPin } from "./router/session.js";
@@ -73,6 +73,8 @@ async function syncLiveInferHubQuotes(priceCache, baseUrl, apiKey) {
     if (res.ok) {
       const data = await res.json();
       ingestInferHubModelsResponse(priceCache, data);
+      priceCache.lastSyncOkAt = Date.now();
+      priceCache.lastSyncFailure = null;
       const arr = Array.isArray(data) ? data : (data?.data || []);
       priceCache.lastSyncRaw = {
         at: Date.now(),
@@ -82,7 +84,9 @@ async function syncLiveInferHubQuotes(priceCache, baseUrl, apiKey) {
         ids: arr.slice(0, 50).map(m => m?.id)
       };
     }
-  } catch {}
+  } catch (e) {
+    priceCache.lastSyncFailure = String(e?.message || e).slice(0, 200);
+  }
 }
 
 function triggerBackgroundSwrSyncIfNeeded(priceCache, baseUrl, apiKey, ctx) {
@@ -154,6 +158,7 @@ export default {
         edge: "cloudflare-workers",
         timestamp: Date.now(),
         cachedQuotes: Object.keys(priceCache.quotes).length,
+        market: getMarketState(priceCache),
         marketModels: Object.keys(priceCache.modelToProviders).sort(),
         lastSyncRaw: priceCache.lastSyncRaw || null,
         chainAsks: [...new Set(Object.values(CASCADE_CHAINS).flat())]

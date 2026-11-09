@@ -46,6 +46,7 @@ export function createDefaultMarketQuotes() {
         completion: spotCompletion,
         blendedPrice: calculateBlendedPrice(spotPrompt, spotCompletion),
         savingsPct: calculateSavingsPct(modelId, { prompt: spotPrompt, completion: spotCompletion }),
+        priceSource: "seed",
         updatedAt: Date.now()
       });
     });
@@ -58,12 +59,31 @@ export function createPriceCache(initialQuotes = null) {
   const cache = {
     quotes: {},
     modelToProviders: {},
-    lastSyncedAt: Date.now()
+    lastSyncedAt: Date.now(),
+    lastSyncOkAt: 0,
+    lastSyncFailure: null
   };
 
   const seed = initialQuotes !== null ? initialQuotes : createDefaultMarketQuotes();
   updateSpotPrices(cache, seed);
   return cache;
+}
+
+/** Honest market-state summary for health: seeds are seeds, live is live. */
+export function getMarketState(cache) {
+  let liveQuotes = 0;
+  let seededQuotes = 0;
+  for (const q of Object.values(cache.quotes)) {
+    if (q.priceSource === "spot") liveQuotes++;
+    else if (q.priceSource === "seed") seededQuotes++;
+  }
+  return {
+    live: liveQuotes > 0,
+    liveQuotes,
+    seededQuotes,
+    lastSyncOkAt: cache.lastSyncOkAt || null,
+    lastSyncFailure: cache.lastSyncFailure || null
+  };
 }
 
 function getQuoteKey(providerId, modelId) {
@@ -89,7 +109,8 @@ export function updateSpotPrices(cache, quoteList) {
       completion,
       blendedPrice: blended,
       savingsPct,
-      priceSource: "spot",
+      // Live ingest carries no source; seeded loads stamp "seed" themselves.
+      priceSource: raw.priceSource || "spot",
       updatedAt: now
     };
 
