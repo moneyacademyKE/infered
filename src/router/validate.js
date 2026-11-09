@@ -5,7 +5,12 @@
  */
 
 export const MAX_BODY_BYTES = 2 * 1024 * 1024; // 2 MiB request bodies
-export const MAX_MESSAGES = 128;
+// 512, not 128: real agent harnesses (OpenCrabs) resend full tool-loop history
+// every turn and cross 128 messages in one long session. A 400 at this gate is
+// indistinguishable from a dead provider to the client, so it triggered silent
+// fallback-to-direct-InferHub before the cascade ever ran (2026-11-09 incident).
+// The 2 MiB byte cap remains the real physical bound; this is a shape bound.
+export const MAX_MESSAGES = 512;
 export const MAX_TOOLS = 64;
 export const MAX_TOP_TOKENS = 1_000_000;
 const MAX_STRING_CONTENT = 512 * 1024; // single content string cap

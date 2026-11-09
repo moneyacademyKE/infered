@@ -102,21 +102,24 @@
                 const badShapeJson = await badShape.json().catch(() => ({}));
                 const badMsg = await worker.fetch(mkReq(JSON.stringify({ model: 'infered/glm-budget', messages: [{}] })), env, ctx);
                 const badMsgJson = await badMsg.json().catch(() => ({}));
-                const manyMsgs = Array.from({ length: 500 }, () => ({ role: 'user', content: 'hi' }));
+                const manyMsgs = Array.from({ length: 600 }, () => ({ role: 'user', content: 'hi' }));
                 const manyRes = await worker.fetch(mkReq(JSON.stringify({ model: 'infered/glm-budget', messages: manyMsgs })), env, ctx);
+                const deepSession = Array.from({ length: 130 }, () => ({ role: 'user', content: 'hi' }));
+                const deepRes = await worker.fetch(mkReq(JSON.stringify({ model: 'infered/glm-budget', messages: deepSession })), env, ctx);
                 const ok = await worker.fetch(mkReq(JSON.stringify({ model: 'infered/glm-budget', messages: [{ role: 'user', content: 'valid' }] })), env, ctx);
                 console.log(JSON.stringify({
                   hugeStatus: hugeRes.status, badShapeStatus: badShape.status,
                   badShapeType: (badShapeJson.error || {}).type,
                   badMsgStatus: badMsg.status, badMsgType: (badMsgJson.error || {}).type,
-                  manyStatus: manyRes.status, okStatus: ok.status
+                  manyStatus: manyRes.status, deepStatus: deepRes.status, okStatus: ok.status
                 }));")]
       (is (= 413 (:hugeStatus res)) "bodies over the byte cap get 413, not parsed")
       (is (= 400 (:badShapeStatus res)) "messages must be an array")
       (is (= "invalid_request_error" (:badShapeType res)))
       (is (= 400 (:badMsgStatus res)) "each message needs role and content")
       (is (= "invalid_request_error" (:badMsgType res)))
-      (is (= 400 (:manyStatus res)) "message count over the cap is rejected")
+      (is (= 400 (:manyStatus res)) "message count over the cap is rejected (600 > 512)")
+      (is (= 200 (:deepStatus res)) "deep agent sessions with 130+ messages route (2026-11-09 fallback incident)")
       (is (= 200 (:okStatus res)) "valid minimal requests still route"))))
 
 (deftest test-health-distinguishes-seeded-from-live-market
